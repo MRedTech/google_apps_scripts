@@ -1,0 +1,428 @@
+// ==================================================
+// SECURE ENTRY - SENSORY (BACKEND - SEARCH + SYNC MIRROR)
+// doPost: SYNC from Worker (append row, optional fetch image->Drive)
+// doGet : TURBO search with compact cache (FOUND/EXPIRED/NO_RECORD)
+// ==================================================
+
+const SHEET_NAME = "SENSORY";
+const DRIVE_FOLDER_ID = "1lrjbyVWGcBCEQE5vc08qPty14Yn5-HaI";
+const MAX_ROW = 6000;
+
+// ✅ MUST match Worker env SYNC_TOKEN
+const SYNC_TOKEN = "SE_SYNC_9f3c1a7b2d4e6f8091ab3cd5ef678901R";
+
+// Cache keys
+const KEY_REG  = "IDX_REG_V1";
+const KEY_ID   = "IDX_ID_V1";
+const KEY_META = "IDX_META_V1";
+const CACHE_TTL = 3600;
+
+// ==================================================
+// Helpers
+// ==================================================
+function output_(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function normKey_(s) {
+  return (s || "").toString().toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function normalizeText_(str) {
+  if (!str) return "";
+  return str
+    .toString()
+    .normalize("NFKD")
+    .replace(/[^\w\s\/\-\&\(\)]/g, "")
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
+}
+
+function formatPhone_(contact) {
+  let phone = (contact || "").toString().trim();
+  if (phone && !phone.startsWith("0")) phone = "0" + phone;
+  if (phone) phone = "'" + phone; // keep leading 0
+  return phone.toUpperCase();
+}
+
+function formatDateTimeDMY_(dateObj) {
+  const d = dateObj.getDate();
+  const m = dateObj.getMonth() + 1;
+  const y = dateObj.getFullYear();
+  const h = String(dateObj.getHours()).padStart(2, "0");
+  const min = String(dateObj.getMinutes()).padStart(2, "0");
+  const s = String(dateObj.getSeconds()).padStart(2, "0");
+  return d + "/" + m + "/" + y + " " + h + ":" + min + ":" + s;
+}
+
+function getSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_NAME);
+  if (!sheet) throw new Error("Sheet not found: " + SHEET_NAME);
+  return sheet;
+}
+
+// Extract URL from =HYPERLINK("url","text")
+function extractHyperlinkUrl_(formula) {
+  const f = (formula || "").toString();
+  if (!f) return "";
+  if (f.toUpperCase().indexOf("HYPERLINK(") === -1) return "";
+
+  // Try "url"
+  let m = f.match(/HYPERLINK\(\s*\"([^\"]+)\"/i);
+  if (m && m[1]) return m[1].trim();
+
+  // Try 'url'
+  m = f.match(/HYPERLINK\(\s*'([^']+)'/i);
+  if (m && m[1]) return m[1].trim();
+
+  return "";
+}
+
+function extractDriveFileId_(url) {
+  const u = (url || "").toString().trim();
+  if (!u) return "";
+
+  // uc?export=view&id=FILEID
+  let m = u.match(/[?&]id=([\w-]+)/i);
+  if (m && m[1]) return m[1];
+
+  // /d/FILEID/
+  m = u.match(/\/d\/([\w-]+)/i);
+  if (m && m[1]) return m[1];
+
+  return "";
+}
+
+// ==================================================
+// Auto delete jika > MAX_ROW baris, dan padam gambar di Drive
+// - Supports deleting via Column I link OR Column B HYPERLINK formula
+// ==================================================
+function autoDeleteRows_(sheet, maxRows) {
+  const totalRows = sheet.getLastRow();
+  if (totalRows <= maxRows + 1) return false;
+
+  const rowsToDelete = totalRows - maxRows - 1;
+  if (rowsToDelete <= 0) return false;
+
+  // Get col I values + col B formulas for the rows being deleted
+  const photoLinks = sheet.getRange(2, 9, rowsToDelete, 1).getValues();     // I
+  const nameFormulas = sheet.getRange(2, 2, rowsToDelete, 1).getFormulas(); // B
+
+  for (let i = 0; i < rowsToDelete; i++) {
+    const colIUrl = (photoLinks[i][0] || "").toString().trim();
+    const colBFormula = (nameFormulas[i][0] || "").toString().trim();
+    const colBUrl = extractHyperlinkUrl_(colBFormula);
+
+    const url = colIUrl || colBUrl;
+    const fileId = extractDriveFileId_(url);
+    if (fileId) {
+      try { DriveApp.getFileById(fileId).setTrashed(true); } catch (err) {}
+    }
+  }
+
+  sheet.deleteRows(2, rowsToDelete);
+  return true;
+}
+
+// ==================================================
+// doPost (SYNC dari Worker)
+// Expect JSON:
+// {
+//   token,
+//   namePassport,mykadPassport,regnum,contact,remark,unitNumber,tower,reason,reasonOther,
+//   imageViewUrl,          // if new image exists (NO_RECORD / EXPIRED)
+//   existingPhotoLink      // if FOUND (reuse proof only; we will NOT write hyperlink in new row)
+// }
+// ==================================================
+function doPost(e) {
+  try {
+    const sheet = getSheet_();
+
+    let data = {};
+    try {
+      data = JSON.parse(e.postData && e.postData.contents ? e.postData.contents : "{}");
+    } catch (err) {
+      return output_({ success: false, error: true, message: "Invalid JSON: " + err.message });
+    }
+
+    if ((data.token || "") !== SYNC_TOKEN) {
+      return output_({ success: false, error: true, message: "Unauthorized" });
+    }
+
+    const nameText = normalizeText_(data.namePassport);
+    const regText  = normalizeText_(data.regnum);
+
+    // ===== Determine submission type =====
+    const imageViewUrl = (data.imageViewUrl || "").toString().trim();
+    const existingPhotoLink = (data.existingPhotoLink || "").toString().trim();
+
+    let photoUrl = "";
+    let hasNewPhoto = false;   // NO_RECORD / EXPIRED (new capture)
+    let isFoundReuse = false;  // FOUND (no new capture)
+
+    // Priority:
+    // 1) If imageViewUrl exists and fetch success -> upload to Drive (NEW PHOTO)
+    // 2) Else -> FOUND reuse (we will not write hyperlink in new row)
+    if (imageViewUrl) {
+      const resp = UrlFetchApp.fetch(imageViewUrl, {
+        method: "get",
+        followRedirects: true,
+        muteHttpExceptions: true
+      });
+
+      const code = resp.getResponseCode();
+      if (code >= 200 && code < 300) {
+        const driveFolder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
+        const filename = (nameText || regText || "PHOTO") + "_" + Date.now() + ".jpg";
+
+        const blob = resp.getBlob().setName(filename);
+        const file = driveFolder.createFile(blob);
+        photoUrl = "https://drive.google.com/uc?export=view&id=" + file.getId();
+        hasNewPhoto = true;
+      }
+    }
+
+    // If no new photo, treat as FOUND reuse (even if existingPhotoLink exists)
+    if (!hasNewPhoto) {
+      isFoundReuse = true;
+    }
+
+    // ===== Category / Unit merge =====
+    let remarkValue = normalizeText_(data.remark);
+    const unitNumberValue = normalizeText_(data.unitNumber);
+    if ((remarkValue === "OWNER" || remarkValue === "TENANT") && unitNumberValue) {
+      remarkValue = remarkValue + " ( " + unitNumberValue + " )";
+    }
+
+    // ===== Reason =====
+    let reasonValue = "";
+    const mainReason = (data.reason || "").toString().toUpperCase();
+    const reasonOther = (data.reasonOther || "").toString().trim();
+    if (mainReason === "OTHER" && reasonOther) {
+      reasonValue = "OTHER ( " + reasonOther.toUpperCase() + " )";
+    } else if (mainReason) {
+      reasonValue = mainReason;
+    }
+
+    const now = new Date();
+
+    // ===== Append row =====
+    // ✅ IMPORTANT (Edos concept):
+    // - FOUND reuse: DO NOT write hyperlink + DO NOT write photoUrl in new row (keep blank)
+    // - NEW photo: write photoUrl and hyperlink formula in col B
+    sheet.appendRow([
+      formatDateTimeDMY_(now),              // A TIMESTAMP
+      "",                                  // B NAME (set below)
+      normalizeText_(data.mykadPassport),   // C MYKAD/PASSPORT
+      normalizeText_(data.regnum),          // D REGNUM
+      formatPhone_(data.contact),           // E CONTACT
+      remarkValue,                         // F CATEGORY
+      normalizeText_(data.tower),           // G TOWER
+      reasonValue,                         // H REASON
+      hasNewPhoto ? photoUrl : ""           // I PHOTO LINK
+    ]);
+
+    const lastRow = sheet.getLastRow();
+
+    if (hasNewPhoto && photoUrl) {
+      // Insert formula hyperlink into B
+      const formula = '=HYPERLINK("' + photoUrl + '","' + nameText + '")';
+      sheet.getRange(lastRow, 2).setFormula(formula);
+    } else {
+      // FOUND reuse: plain text name only (no hyperlink)
+      sheet.getRange(lastRow, 2).setValue(nameText);
+    }
+
+    // ===== Auto delete =====
+    const deleted = autoDeleteRows_(sheet, MAX_ROW);
+
+    // Invalidate cache only
+    const cache = CacheService.getScriptCache();
+    cache.remove(KEY_REG); cache.remove(KEY_ID); cache.remove(KEY_META);
+
+    return output_({ success: true, deleted: !!deleted, mode: hasNewPhoto ? "NEW_PHOTO" : "FOUND_REUSE" });
+
+  } catch (err) {
+    return output_({ success: false, error: true, message: err.message });
+  }
+}
+
+// ==================================================
+// TURBO INDEX BUILDER (COMPACT CACHE)
+// Active (FOUND) = column B has HYPERLINK formula (within last MAX_ROW)
+// ==================================================
+function buildIndexCache_() {
+  const sheet = getSheet_();
+
+  const startRow = 2;
+  const lastRow = sheet.getLastRow();
+  const numRows = Math.max(0, Math.min(MAX_ROW, lastRow - 1));
+  if (numRows <= 0) return { reg: "", id: "" };
+
+  const colBFormulas = sheet.getRange(startRow, 2, numRows, 1).getFormulas(); // B
+  const colC = sheet.getRange(startRow, 3, numRows, 1).getValues();           // C
+  const colD = sheet.getRange(startRow, 4, numRows, 1).getValues();           // D
+
+  const byReg = {};
+  const byId  = {};
+
+  for (let i = numRows - 1; i >= 0; i--) {
+    const rowNum = startRow + i;
+
+    const regKey = normKey_(colD[i][0]);
+    const idKey  = normKey_(colC[i][0]);
+
+    const f = (colBFormulas[i][0] || "").toString().toUpperCase();
+    const isActive = f.indexOf("HYPERLINK(") !== -1; // ✅ proof link still exists in last 6000
+
+    if (regKey) {
+      if (!byReg[regKey]) byReg[regKey] = [rowNum, 0];
+      if (isActive && byReg[regKey][1] === 0) byReg[regKey][1] = rowNum;
+    }
+
+    if (idKey) {
+      if (!byId[idKey]) byId[idKey] = [rowNum, 0];
+      if (isActive && byId[idKey][1] === 0) byId[idKey][1] = rowNum;
+    }
+  }
+
+  function toCompactStr_(mapObj) {
+    const keys = Object.keys(mapObj);
+    if (!keys.length) return "";
+    let out = "";
+    for (const k of keys) {
+      const anyRow = mapObj[k][0] || 0;
+      const actRow = mapObj[k][1] || 0;
+      out += k + "|" + anyRow.toString(36) + "|" + actRow.toString(36) + "\n";
+    }
+    return out;
+  }
+
+  return { reg: toCompactStr_(byReg), id: toCompactStr_(byId) };
+}
+
+function getIndex_() {
+  const cache = CacheService.getScriptCache();
+  const lock  = LockService.getScriptLock();
+
+  const sheet = getSheet_();
+  const currentLastRow = sheet.getLastRow();
+
+  const regStr  = cache.get(KEY_REG);
+  const idStr   = cache.get(KEY_ID);
+  const metaStr = cache.get(KEY_META);
+  const cachedLastRow = metaStr ? parseInt(metaStr, 10) : 0;
+
+  if (regStr !== null && idStr !== null && cachedLastRow === currentLastRow) {
+    return { reg: regStr, id: idStr };
+  }
+
+  lock.waitLock(15000);
+  try {
+    const reg2  = cache.get(KEY_REG);
+    const id2   = cache.get(KEY_ID);
+    const meta2 = cache.get(KEY_META);
+    const last2 = meta2 ? parseInt(meta2, 10) : 0;
+
+    if (reg2 !== null && id2 !== null && last2 === currentLastRow) {
+      return { reg: reg2, id: id2 };
+    }
+
+    const idx = buildIndexCache_();
+    cache.put(KEY_REG,  idx.reg || "", CACHE_TTL);
+    cache.put(KEY_ID,   idx.id  || "", CACHE_TTL);
+    cache.put(KEY_META, String(currentLastRow), CACHE_TTL);
+
+    return idx;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function resolveCompact_(target, compactStr) {
+  if (!compactStr) return { status: "NO_RECORD" };
+
+  const needle = target + "|";
+  const pos = compactStr.indexOf(needle);
+  if (pos === -1) return { status: "NO_RECORD" };
+
+  const end = compactStr.indexOf("\n", pos);
+  const line = (end === -1) ? compactStr.substring(pos) : compactStr.substring(pos, end);
+  const parts = line.split("|");
+
+  const anyRow = parseInt(parts[1] || "0", 36) || 0;
+  const actRow = parseInt(parts[2] || "0", 36) || 0;
+
+  if (!anyRow) return { status: "NO_RECORD" };
+  if (actRow) return { status: "ACTIVE", row: actRow };
+  return { status: "EXPIRED" };
+}
+
+// ==================================================
+// doGet (Search)
+// - FOUND (ACTIVE): return details + photoLink extracted from column B HYPERLINK formula
+// - EXPIRED: exist true, hasHyperlink false
+// - NO_RECORD: exist false
+// ==================================================
+function doGet(e) {
+  try {
+    const p = e && e.parameter ? e.parameter : {};
+    const value = (p.value || "").toString();
+    const field = (p.field || "").toString();
+
+    if (!value) return output_({ exist: false });
+
+    const target = normKey_(value);
+    const idx = getIndex_();
+
+    let result;
+    if (field) {
+      const f = normKey_(field);
+      if (f === "REGNUM") result = resolveCompact_(target, idx.reg);
+      else if (f === "MYKADPASSPORT") result = resolveCompact_(target, idx.id);
+      else result = { status: "NO_RECORD" };
+    } else {
+      result = resolveCompact_(target, idx.reg);
+      if (result.status === "NO_RECORD") result = resolveCompact_(target, idx.id);
+    }
+
+    if (result.status === "NO_RECORD") return output_({ exist: false });
+
+    if (result.status === "EXPIRED") {
+      return output_({ exist: true, hasHyperlink: false, data: {} });
+    }
+
+    // ACTIVE
+    const sheet = getSheet_();
+    const full = sheet.getRange(result.row, 1, 1, 9).getValues()[0];
+    const nameFormula = sheet.getRange(result.row, 2).getFormula(); // column B formula
+    const urlFromB = extractHyperlinkUrl_(nameFormula);
+
+    // If column I has link, prefer it; else use extracted from B formula
+    const colI = (full[8] || "").toString().trim();
+    const photoLink = /^https?:\/\//i.test(colI) ? colI : urlFromB;
+
+    return output_({
+      exist: true,
+      hasHyperlink: true,
+      data: {
+        namePassport: full[1] || "",
+        mykadPassport: full[2] || "",
+        regnum: full[3] || "",
+        contact: full[4] || "",
+        remark: full[5] || "",
+        tower: full[6] || "",
+        reason: full[7] || "",
+        photoLink: photoLink || ""
+      }
+    });
+
+  } catch (err) {
+    return output_({ error: true, message: err.message });
+  }
+}
