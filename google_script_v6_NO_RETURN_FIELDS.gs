@@ -12,7 +12,7 @@
 //   - EXPIRED = anyRow exists BUT no proof photo (or proof outside retention window)
 // ==================================================
 
-const SHEET_NAME = "SENSORY";
+const SHEET_NAME = "MREDTECH";
 // If this Apps Script is standalone (not bound to the Sheet), set SPREADSHEET_ID.
 // Optional override: set Script Property "SPREADSHEET_ID".
 const SPREADSHEET_ID_FALLBACK = "1vD4CLiI1lPI65I2wvDkYlUw9L_hoe1gIPNpuCj7YrKg";
@@ -24,7 +24,7 @@ const KEY_REG  = "IDX_REG_V2";
 const KEY_ID   = "IDX_ID_V2";
 const KEY_META = "IDX_META_V2";
 const CACHE_TTL = 3600; // seconds
-const RETENTION_DAYS = 120; // Auto-delete data + Drive photo after 120 days
+const RETENTION_DAYS = 1;
 
 // ==================================================
 // Cache meta signature
