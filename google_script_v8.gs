@@ -15,7 +15,7 @@
 const SHEET_NAME = "SENSORY";
 // If this Apps Script is standalone (not bound to the Sheet), set SPREADSHEET_ID.
 // Optional override: set Script Property "SPREADSHEET_ID".
-const SPREADSHEET_ID_FALLBACK = "1vD4CLiI1lPI65I2wvDkYlUw9L_hoe1gIPNpuCj7YrKg";
+const SPREADSHEET_ID_FALLBACK = "1lfThC9DkZnCF0NWW0wJ9FP2W0DeTy8qpTPgD1dKil-I";
 const DRIVE_FOLDER_ID = "1lrjbyVWGcBCEQE5vc08qPty14Yn5-HaI";
 const SYNC_TOKEN = "SE_SYNC_9f3c1a7b2d4e6f8091ab3cd5ef678901R";
 
@@ -24,7 +24,7 @@ const KEY_REG  = "IDX_REG_V2";
 const KEY_ID   = "IDX_ID_V2";
 const KEY_META = "IDX_META_V2";
 const CACHE_TTL = 3600; // seconds
-const RETENTION_DAYS = 120; // Auto-delete data + Drive photo after 120 days
+const RETENTION_DAYS = 90; // Auto-delete data + Drive photo after 90 days
 
 // ==================================================
 // Cache meta signature
