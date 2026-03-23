@@ -17,7 +17,7 @@ const SHEET_NAME = "MLUNA";
 // Optional override: set Script Property "SPREADSHEET_ID".
 const SPREADSHEET_ID_FALLBACK = "1KoH97mQ0MBmAy6mbp3T7mxWVof27_vLS4s0E76fYPgc";
 const DRIVE_FOLDER_ID = "1OUnKEPxygKk4iAYgR47Hxz-KXhcoo3W3";
-const SYNC_TOKEN = "SE_SYNC_9f3c1a7b2d4e6f8091ab3cd5ef678901R";
+const SYNC_TOKEN = "MLUNA_SYNC_9f3c1a7b2d4e6f8091ab3cd5ef678901R";
 
 // Cache keys (compact string - avoid size limit)
 const KEY_REG  = "IDX_REG_V2";
