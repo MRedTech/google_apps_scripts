@@ -56,7 +56,7 @@ function onOpen() {
 function buildDashboard() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sourceSheet = ss.getSheetByName(DASHBOARD_CONFIG.sourceSheetName);
-  if (!sourceSheet) throw new Error("Sheet source 'SENSORY' tidak dijumpai.");
+  if (!sourceSheet) throw new Error("Source sheet 'SENSORY' was not found.");
 
   const dashboardSheet = getOrCreateSheet_(ss, DASHBOARD_CONFIG.dashboardSheetName);
   initializeDashboardLayout_(dashboardSheet, sourceSheet);
@@ -68,8 +68,8 @@ function refreshDashboard() {
   const sourceSheet = ss.getSheetByName(DASHBOARD_CONFIG.sourceSheetName);
   const dashboardSheet = ss.getSheetByName(DASHBOARD_CONFIG.dashboardSheetName);
 
-  if (!sourceSheet) throw new Error("Sheet source 'SENSORY' tidak dijumpai.");
-  if (!dashboardSheet) throw new Error("Sheet dashboard 'DASHBOARD' tidak dijumpai. Jalankan buildDashboard() dahulu.");
+  if (!sourceSheet) throw new Error("Source sheet 'SENSORY' was not found.");
+  if (!dashboardSheet) throw new Error("Dashboard sheet 'DASHBOARD' was not found. Please run buildDashboard() first.");
 
   const allRows = getSourceRows_(sourceSheet);
   if (!allRows.length) {
@@ -469,8 +469,8 @@ function buildStatistics_(filteredRows, allRows) {
     .slice(0, 1);
 
   const totalFiltered = statsRows.length;
-  const existingCount = recordStatus.find(r => r[0] === 'REKOD SEDIA ADA')?.[1] || 0;
-  const newCount = recordStatus.find(r => r[0] === 'REKOD BARU')?.[1] || 0;
+  const existingCount = recordStatus.find(r => r[0] === 'EXISTING RECORD')?.[1] || 0;
+  const newCount = recordStatus.find(r => r[0] === 'NEW RECORD')?.[1] || 0;
   const foundRate = totalFiltered ? `${Math.round((existingCount / totalFiltered) * 100)}%` : '0%';
   const newRate = totalFiltered ? `${Math.round((newCount / totalFiltered) * 100)}%` : '0%';
   const topPeakHour = peakHourTop.length ? peakHourTop[0][0] : '-';
@@ -501,7 +501,7 @@ function aggregateMonthlyGroupLast3Months_(rows) {
     const d = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - i, 1);
     const key = d.getFullYear() * 100 + (d.getMonth() + 1);
     const label = monthNames[d.getMonth()] + ' ' + d.getFullYear();
-    const bucket = [label, 0, 0, 0]; // FOOD, E-HAILING, PARCEL
+    const bucket = [label, 0, 0, 0];
     buckets.push(bucket);
     bucketMap.set(key, bucket);
   }
@@ -563,17 +563,17 @@ function buildTowerGroupBreakdown_(rows) {
 }
 
 function buildRecordStatus_(rows) {
-  let baru = 0;
-  let sediaAda = 0;
+  let newRecordCount = 0;
+  let existingRecordCount = 0;
 
   rows.forEach(row => {
-    if (row.photoLink) baru += 1;
-    else sediaAda += 1;
+    if (row.photoLink) newRecordCount += 1;
+    else existingRecordCount += 1;
   });
 
   return [
-    ['REKOD BARU', baru],
-    ['REKOD SEDIA ADA', sediaAda]
+    ['NEW RECORD', newRecordCount],
+    ['EXISTING RECORD', existingRecordCount]
   ];
 }
 
@@ -593,9 +593,9 @@ function writeDashboardValues_(sheet, stats, dateFilter) {
 
   const notes = {
     'A7:B7': `${dateFilter.startLabel} - ${dateFilter.endLabel}`,
-    'C7:D7': 'Waktu puncak tertinggi dalam filter',
-    'E7:F7': 'Rekod sedia ada / total dalam filter',
-    'G7:H7': 'Rekod baru / total dalam filter'
+    'C7:D7': 'Highest peak hour within the selected filter',
+    'E7:F7': 'Existing records / total within filter',
+    'G7:H7': 'New records / total within filter'
   };
 
   Object.keys(values).forEach(rangeA1 => sheet.getRange(rangeA1).setValue(values[rangeA1]));
@@ -773,6 +773,7 @@ function writeHelperTables_(sheet, stats) {
     if (table.rows && table.rows.length) {
       sheet.getRange(startRow + 2, col, table.rows.length, width).setValues(table.rows);
       sheet.getRange(startRow + 2, col, table.rows.length, 1).setNumberFormat('@');
+
       if (table.title === 'CATEGORY') {
         sheet.getRange(startRow + 2, col + 1, table.rows.length, 1).setNumberFormat('0');
         sheet.getRange(startRow + 2, col + 2, table.rows.length, 1).setNumberFormat('@');
