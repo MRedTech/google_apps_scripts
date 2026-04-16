@@ -45,12 +45,12 @@ const ACTIVE_GROUPS = [
 
 const TOWER_GROUP_ORDER = ACTIVE_GROUPS.slice();
 
-function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('Secure Entry Dashboard')
-    .addItem('Build Dashboard', 'buildDashboard')
-    .addItem('Refresh Dashboard', 'refreshDashboard')
-    .addToUi();
+function onOpen(e) {
+  try {
+    enforceOpenSecurity_();
+  } catch (err) {
+    Logger.log('onOpen error: ' + err);
+  }
 }
 
 function buildDashboard() {
@@ -61,6 +61,7 @@ function buildDashboard() {
   const dashboardSheet = getOrCreateSheet_(ss, DASHBOARD_CONFIG.dashboardSheetName);
   initializeDashboardLayout_(dashboardSheet, sourceSheet);
   refreshDashboard();
+  enforceOpenSecurity_();
 }
 
 function refreshDashboard() {
@@ -984,4 +985,113 @@ function safeUpper_(value) {
 function removeAllCharts_(sheet) {
   const charts = sheet.getCharts();
   charts.forEach(chart => sheet.removeChart(chart));
+}
+
+function onEdit(e) {
+  try {
+    if (!e || !e.range) return;
+
+    const sheet = e.range.getSheet();
+    if (sheet.getName() !== DASHBOARD_CONFIG.dashboardSheetName) return;
+
+    const a1 = e.range.getA1Notation();
+    const isStart = a1 === DASHBOARD_CONFIG.filterStartCell;
+    const isEnd = a1 === DASHBOARD_CONFIG.filterEndCell;
+
+    if (!isStart && !isEnd) return;
+
+    // Re-apply date filter styling and format
+    styleFilterCell_(sheet.getRange(DASHBOARD_CONFIG.filterStartCell));
+    styleFilterCell_(sheet.getRange(DASHBOARD_CONFIG.filterEndCell));
+
+    sheet.getRange(DASHBOARD_CONFIG.filterStartCell).setNumberFormat('dd/MM/yyyy');
+    sheet.getRange(DASHBOARD_CONFIG.filterEndCell).setNumberFormat('dd/MM/yyyy');
+
+    // Refresh ONLY when End Date (D3) is edited
+    if (isEnd) {
+      refreshDashboard();
+      SpreadsheetApp.flush();
+    }
+
+  } catch (err) {
+    Logger.log('onEdit error: ' + err);
+  }
+}
+
+function enforceOpenSecurity_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const dashboardSheet = ss.getSheetByName(DASHBOARD_CONFIG.dashboardSheetName);
+  const sensorySheet = ss.getSheetByName(DASHBOARD_CONFIG.sourceSheetName);
+
+  applyDashboardProtection_();
+  applySensoryProtection_();
+
+  if (sensorySheet && !sensorySheet.isSheetHidden()) {
+    sensorySheet.hideSheet();
+  }
+
+  if (dashboardSheet) {
+    styleFilterCell_(dashboardSheet.getRange(DASHBOARD_CONFIG.filterStartCell));
+    styleFilterCell_(dashboardSheet.getRange(DASHBOARD_CONFIG.filterEndCell));
+
+    dashboardSheet.getRange(DASHBOARD_CONFIG.filterStartCell).setNumberFormat('dd/MM/yyyy');
+    dashboardSheet.getRange(DASHBOARD_CONFIG.filterEndCell).setNumberFormat('dd/MM/yyyy');
+  }
+
+  SpreadsheetApp.flush();
+}
+
+function applyDashboardProtection_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(DASHBOARD_CONFIG.dashboardSheetName);
+  if (!sheet) throw new Error("Dashboard sheet was not found.");
+
+  const protections = sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET);
+  protections.forEach(p => {
+    if (p.canEdit()) p.remove();
+  });
+
+  const protection = sheet.protect().setDescription('Lock dashboard except B3 and D3');
+
+  protection.setUnprotectedRanges([
+    sheet.getRange(DASHBOARD_CONFIG.filterStartCell),
+    sheet.getRange(DASHBOARD_CONFIG.filterEndCell)
+  ]);
+
+  const me = Session.getEffectiveUser();
+  protection.addEditor(me);
+
+  const otherEditors = protection.getEditors().filter(user => user.getEmail() !== me.getEmail());
+  if (otherEditors.length) {
+    protection.removeEditors(otherEditors);
+  }
+
+  if (protection.canDomainEdit()) {
+    protection.setDomainEdit(false);
+  }
+}
+
+function applySensoryProtection_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(DASHBOARD_CONFIG.sourceSheetName);
+  if (!sheet) throw new Error("Sensory sheet was not found.");
+
+  const protections = sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET);
+  protections.forEach(p => {
+    if (p.canEdit()) p.remove();
+  });
+
+  const protection = sheet.protect().setDescription('Lock sensory sheet');
+
+  const me = Session.getEffectiveUser();
+  protection.addEditor(me);
+
+  const otherEditors = protection.getEditors().filter(user => user.getEmail() !== me.getEmail());
+  if (otherEditors.length) {
+    protection.removeEditors(otherEditors);
+  }
+
+  if (protection.canDomainEdit()) {
+    protection.setDomainEdit(false);
+  }
 }
