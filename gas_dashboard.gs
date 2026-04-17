@@ -1,8 +1,8 @@
 const DASHBOARD_CONFIG = {
-  sourceSheetName: 'SENSORY',
+  sourceSheetName: 'MLUNA',
   dashboardSheetName: 'DASHBOARD',
   timezone: 'Asia/Kuala_Lumpur',
-  headerTitle: 'SECURE ENTRY DASHBOARD | SENSORY',
+  headerTitle: 'SECURE ENTRY DASHBOARD | MLUNA',
   headerSubtitle: 'REGISTER.ACCESS.SECURE',
   filterStartCell: 'B3',
   filterEndCell: 'D3',
@@ -45,23 +45,20 @@ const ACTIVE_GROUPS = [
 
 const TOWER_GROUP_ORDER = ACTIVE_GROUPS.slice();
 
-function onOpen(e) {
-  try {
-    enforceOpenSecurity_();
-  } catch (err) {
-    Logger.log('onOpen error: ' + err);
-  }
+function onOpen() {
+  hideSensitiveSheets_();
 }
 
 function buildDashboard() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sourceSheet = ss.getSheetByName(DASHBOARD_CONFIG.sourceSheetName);
-  if (!sourceSheet) throw new Error("Source sheet 'SENSORY' was not found.");
+  if (!sourceSheet) throw new Error("Source sheet 'MLUNA' was not found.");
 
   const dashboardSheet = getOrCreateSheet_(ss, DASHBOARD_CONFIG.dashboardSheetName);
   initializeDashboardLayout_(dashboardSheet, sourceSheet);
   refreshDashboard();
-  enforceOpenSecurity_();
+  applyDashboardProtection_();
+  applyMlunaProtection_();
 }
 
 function refreshDashboard() {
@@ -69,7 +66,7 @@ function refreshDashboard() {
   const sourceSheet = ss.getSheetByName(DASHBOARD_CONFIG.sourceSheetName);
   const dashboardSheet = ss.getSheetByName(DASHBOARD_CONFIG.dashboardSheetName);
 
-  if (!sourceSheet) throw new Error("Source sheet 'SENSORY' was not found.");
+  if (!sourceSheet) throw new Error("Source sheet 'MLUNA' was not found.");
   if (!dashboardSheet) throw new Error("Dashboard sheet 'DASHBOARD' was not found. Please run buildDashboard() first.");
 
   const allRows = getSourceRows_(sourceSheet);
@@ -1000,45 +997,17 @@ function onEdit(e) {
 
     if (!isStart && !isEnd) return;
 
-    // Re-apply date filter styling and format
+    refreshDashboard();
+
     styleFilterCell_(sheet.getRange(DASHBOARD_CONFIG.filterStartCell));
     styleFilterCell_(sheet.getRange(DASHBOARD_CONFIG.filterEndCell));
 
     sheet.getRange(DASHBOARD_CONFIG.filterStartCell).setNumberFormat('dd/MM/yyyy');
     sheet.getRange(DASHBOARD_CONFIG.filterEndCell).setNumberFormat('dd/MM/yyyy');
 
-    // Refresh ONLY when End Date (D3) is edited
-    if (isEnd) {
-      refreshDashboard();
-      SpreadsheetApp.flush();
-    }
-
   } catch (err) {
     Logger.log('onEdit error: ' + err);
   }
-}
-
-function enforceOpenSecurity_() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const dashboardSheet = ss.getSheetByName(DASHBOARD_CONFIG.dashboardSheetName);
-  const sensorySheet = ss.getSheetByName(DASHBOARD_CONFIG.sourceSheetName);
-
-  applyDashboardProtection_();
-  applySensoryProtection_();
-
-  if (sensorySheet && !sensorySheet.isSheetHidden()) {
-    sensorySheet.hideSheet();
-  }
-
-  if (dashboardSheet) {
-    styleFilterCell_(dashboardSheet.getRange(DASHBOARD_CONFIG.filterStartCell));
-    styleFilterCell_(dashboardSheet.getRange(DASHBOARD_CONFIG.filterEndCell));
-
-    dashboardSheet.getRange(DASHBOARD_CONFIG.filterStartCell).setNumberFormat('dd/MM/yyyy');
-    dashboardSheet.getRange(DASHBOARD_CONFIG.filterEndCell).setNumberFormat('dd/MM/yyyy');
-  }
-
-  SpreadsheetApp.flush();
 }
 
 function applyDashboardProtection_() {
@@ -1071,17 +1040,17 @@ function applyDashboardProtection_() {
   }
 }
 
-function applySensoryProtection_() {
+function applyMlunaProtection_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(DASHBOARD_CONFIG.sourceSheetName);
-  if (!sheet) throw new Error("Sensory sheet was not found.");
+  if (!sheet) throw new Error("Source sheet 'MLUNA' was not found.");
 
   const protections = sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET);
   protections.forEach(p => {
     if (p.canEdit()) p.remove();
   });
 
-  const protection = sheet.protect().setDescription('Lock sensory sheet');
+  const protection = sheet.protect().setDescription('Lock full MLUNA sheet');
 
   const me = Session.getEffectiveUser();
   protection.addEditor(me);
