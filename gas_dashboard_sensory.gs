@@ -47,6 +47,16 @@ const TOWER_GROUP_ORDER = ACTIVE_GROUPS.slice();
 
 function onOpen() {
   hideSensitiveSheets_();
+
+  SpreadsheetApp.getUi()
+    .createMenu('SECURE ENTRY')
+    .addItem('BUILD DASHBOARD', 'buildDashboard')
+    .addItem('REFRESH DASHBOARD', 'refreshDashboard')
+    .addSeparator()
+    .addItem('SETUP SEARCH RECORD', 'setupSearchRecordSheet')
+    .addItem('SEARCH NOW', 'runSearchRecord')
+    .addItem('CLEAR SEARCH', 'clearSearchRecord')
+    .addToUi();
 }
 
 function buildDashboard() {
@@ -989,21 +999,48 @@ function onEdit(e) {
     if (!e || !e.range) return;
 
     const sheet = e.range.getSheet();
-    if (sheet.getName() !== DASHBOARD_CONFIG.dashboardSheetName) return;
-
+    const sheetName = sheet.getName();
     const a1 = e.range.getA1Notation();
-    const isStart = a1 === DASHBOARD_CONFIG.filterStartCell;
-    const isEnd = a1 === DASHBOARD_CONFIG.filterEndCell;
 
-    if (!isStart && !isEnd) return;
+    // DASHBOARD FILTER
+    if (sheetName === DASHBOARD_CONFIG.dashboardSheetName) {
+      const isStart = a1 === DASHBOARD_CONFIG.filterStartCell;
+      const isEnd = a1 === DASHBOARD_CONFIG.filterEndCell;
 
-    refreshDashboard();
+      if (!isStart && !isEnd) return;
 
-    styleFilterCell_(sheet.getRange(DASHBOARD_CONFIG.filterStartCell));
-    styleFilterCell_(sheet.getRange(DASHBOARD_CONFIG.filterEndCell));
+      refreshDashboard();
+      styleFilterCell_(sheet.getRange(DASHBOARD_CONFIG.filterStartCell));
+      styleFilterCell_(sheet.getRange(DASHBOARD_CONFIG.filterEndCell));
+      sheet.getRange(DASHBOARD_CONFIG.filterStartCell).setNumberFormat('dd/MM/yyyy');
+      sheet.getRange(DASHBOARD_CONFIG.filterEndCell).setNumberFormat('dd/MM/yyyy');
+      return;
+    }
 
-    sheet.getRange(DASHBOARD_CONFIG.filterStartCell).setNumberFormat('dd/MM/yyyy');
-    sheet.getRange(DASHBOARD_CONFIG.filterEndCell).setNumberFormat('dd/MM/yyyy');
+    // SEARCH RECORD INPUT
+    if (sheetName === SEARCH_RECORD_CONFIG.sheetName && a1 === SEARCH_RECORD_CONFIG.inputCell) {
+      let value = String(e.range.getDisplayValue() || '');
+
+      if (isSearchInputPlaceholder_(value)) {
+        clearSearchInputPlaceholder_(sheet);
+        return;
+      }
+
+      value = value.trim().toUpperCase();
+
+      if (String(e.range.getDisplayValue() || '') !== value) {
+        e.range.setValue(value);
+      }
+
+      if (!value) {
+        clearSearchRecord();
+        applySearchInputPlaceholder_(sheet);
+      } else {
+        setSearchInputActiveStyle_(sheet);
+        runSearchRecord();
+      }
+      return;
+    }
 
   } catch (err) {
     Logger.log('onEdit error: ' + err);
