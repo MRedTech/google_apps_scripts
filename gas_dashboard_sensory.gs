@@ -1009,27 +1009,26 @@ function onEdit(e) {
     }
 
     // SEARCH RECORD INPUT
-    if (sheetName === SEARCH_RECORD_CONFIG.sheetName && a1 === SEARCH_RECORD_CONFIG.inputCell) {
-      let value = String(e.range.getDisplayValue() || '');
-
-      if (isSearchInputPlaceholder_(value)) {
-        clearSearchInputPlaceholder_(sheet);
-        return;
-      }
-
-      value = value.trim().toUpperCase();
-
-      if (String(e.range.getDisplayValue() || '') !== value) {
-        e.range.setValue(value);
-      }
+    if (
+      typeof SEARCH_RECORD_CONFIG !== 'undefined' &&
+      sheetName === SEARCH_RECORD_CONFIG.sheetName &&
+      a1 === SEARCH_RECORD_CONFIG.inputCell
+    ) {
+      let rawValue = String(e.range.getDisplayValue() || '');
+      let value = stripSearchPlaceholder_(rawValue).trim().toUpperCase();
 
       if (!value) {
         clearSearchRecord();
         applySearchInputPlaceholder_(sheet);
-      } else {
-        setSearchInputActiveStyle_(sheet);
-        runSearchRecord();
+        return;
       }
+
+      if (rawValue !== value) {
+        e.range.setValue(value);
+      }
+
+      setSearchInputActiveStyle_(sheet);
+      runSearchRecord();
       return;
     }
 
