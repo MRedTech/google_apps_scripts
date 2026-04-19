@@ -2,7 +2,7 @@ const DASHBOARD_CONFIG = {
   sourceSheetName: 'SENSORY',
   dashboardSheetName: 'DASHBOARD',
   timezone: 'Asia/Kuala_Lumpur',
-  headerTitle: 'SECURE ENTRY DASHBOARD | SENSORY',
+  headerTitle: 'SECURE ENTRY | DASHBOARD SENSORY',
   headerSubtitle: 'REGISTER.ACCESS.SECURE',
   filterStartCell: 'B3',
   filterEndCell: 'D3',
@@ -47,16 +47,6 @@ const TOWER_GROUP_ORDER = ACTIVE_GROUPS.slice();
 
 function onOpen() {
   hideSensitiveSheets_();
-
-  SpreadsheetApp.getUi()
-    .createMenu('SECURE ENTRY')
-    .addItem('BUILD DASHBOARD', 'buildDashboard')
-    .addItem('REFRESH DASHBOARD', 'refreshDashboard')
-    .addSeparator()
-    .addItem('SETUP SEARCH RECORD', 'setupSearchRecordSheet')
-    .addItem('SEARCH NOW', 'runSearchRecord')
-    .addItem('CLEAR SEARCH', 'clearSearchRecord')
-    .addToUi();
 }
 
 function buildDashboard() {
@@ -69,6 +59,7 @@ function buildDashboard() {
   refreshDashboard();
   applyDashboardProtection_();
   applySensoryProtection_();
+  hideSensitiveSheets_();
 }
 
 function refreshDashboard() {
@@ -1099,5 +1090,28 @@ function applySensoryProtection_() {
 
   if (protection.canDomainEdit()) {
     protection.setDomainEdit(false);
+  }
+}
+
+function hideSensitiveSheets_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  const sensorySheet = ss.getSheetByName(DASHBOARD_CONFIG.sourceSheetName);
+  const dashboardSheet = ss.getSheetByName(DASHBOARD_CONFIG.dashboardSheetName);
+  const searchSheet =
+    (typeof SEARCH_RECORD_CONFIG !== 'undefined' && SEARCH_RECORD_CONFIG.sheetName)
+      ? ss.getSheetByName(SEARCH_RECORD_CONFIG.sheetName)
+      : null;
+
+  if (dashboardSheet && dashboardSheet.isSheetHidden()) {
+    dashboardSheet.showSheet();
+  }
+
+  if (searchSheet && searchSheet.isSheetHidden()) {
+    searchSheet.showSheet();
+  }
+
+  if (sensorySheet && !sensorySheet.isSheetHidden()) {
+    sensorySheet.hideSheet();
   }
 }
