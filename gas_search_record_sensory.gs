@@ -483,15 +483,25 @@ function onSelectionChange(e) {
     const selectedA1 = e.range.getA1Notation();
     const inputValue = String(inputRange.getDisplayValue() || '').trim();
 
+    // Bila user pilih/tap C4, placeholder terus hilang
     if (selectedA1 === SEARCH_RECORD_CONFIG.inputCell) {
       if (isSearchInputPlaceholder_(inputValue)) {
-        clearSearchInputPlaceholder_(sheet);
+        inputRange.clearContent();
       }
-    } else {
-      if (!inputValue) {
-        applySearchInputPlaceholder_(sheet);
-      }
+
+      inputRange
+        .setFontColor('#000000')
+        .setFontStyle('normal')
+        .setHorizontalAlignment('left');
+
+      return;
     }
+
+    // Bila user keluar dari C4 dan cell kosong, placeholder muncul balik
+    if (!inputValue) {
+      applySearchInputPlaceholder_(sheet);
+    }
+
   } catch (err) {
     Logger.log('onSelectionChange error: ' + err);
   }
@@ -541,4 +551,19 @@ function normalizeSearchTimestamp_(value) {
     if (parsed) return parsed;
   }
   return value;
+}
+
+function stripSearchPlaceholder_(value) {
+  const text = String(value || '');
+  const placeholder = String(SEARCH_INPUT_PLACEHOLDER || '');
+
+  if (!text) return '';
+  if (!placeholder) return text;
+
+  if (safeUpper_(text) === safeUpper_(placeholder)) {
+    return '';
+  }
+
+  const escaped = placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return text.replace(new RegExp('^\\s*' + escaped + '\\s*', 'i'), '');
 }
