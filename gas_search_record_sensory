@@ -62,7 +62,7 @@ function setupSearchRecordSheet() {
   sh.getRange('C7:F7').merge();
   sh.getRange('B10:J10').merge();
 
-  sh.getRange('B1').setValue('SECURE ENTRY');
+  sh.getRange('B1').setValue('SECURE ENTRY | SEARCH RECORD SENSORY');
   sh.getRange('B2').setValue('REGISTER.ACCESS.SECURE');
 
   sh.getRange('B4').setValue('SEARCH INPUT');
@@ -70,7 +70,7 @@ function setupSearchRecordSheet() {
   sh.getRange('B6').setValue('AUTO DETECT');
   sh.getRange('B7').setValue('TOTAL MATCH');
 
-  sh.getRange('B10').setValue('MATCHING ENTRY RECORDS (TIMESTAMP - PHOTO LINK)');
+  sh.getRange('B10').setValue('MATCHING ENTRY RECORDS');
 
   sh.getRange(
     SEARCH_RECORD_CONFIG.historyHeaderRow,
@@ -95,54 +95,78 @@ function setupSearchRecordSheet() {
 }
 
 function styleSearchRecordSheet_(sh) {
+  // Title
   sh.getRange('B1:J1')
-    .setBackground('#176B39')
-    .setFontColor('#FFFFFF')
+    .setBackground('#e8f5e9')
+    .setFontColor('#1b5e20')
     .setFontWeight('bold')
     .setFontSize(18)
-    .setHorizontalAlignment('center')
+    .setHorizontalAlignment('left')
     .setVerticalAlignment('middle');
 
+  // Subtitle
   sh.getRange('B2:J2')
-    .setBackground('#3BD97B')
-    .setFontColor('#176B39')
-    .setFontWeight('bold')
-    .setFontSize(11)
-    .setHorizontalAlignment('center')
+    .setBackground('#ffffff')
+    .setFontColor('#558b2f')
+    .setFontStyle('italic')
+    .setFontWeight('normal')
+    .setFontSize(10)
+    .setHorizontalAlignment('left')
     .setVerticalAlignment('middle');
 
+  // Left labels
   sh.getRange('B4:B7')
-    .setBackground('#176B39')
-    .setFontColor('#FFFFFF')
-    .setFontWeight('bold');
-
-  sh.getRange('C4:F7')
-    .setBackground('#F7FFF9')
+    .setBackground('#ffffff')
+    .setFontColor('#1b5e20')
     .setFontWeight('bold')
     .setHorizontalAlignment('left')
-    .setBorder(true, true, true, true, true, true, '#3BD97B', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+    .setVerticalAlignment('middle');
 
-  sh.getRange('B10:J10')
-    .setBackground('#176B39')
-    .setFontColor('#FFFFFF')
+  // Input / status / detect / total cells
+  sh.getRange('C4:F7')
+    .setBackground('#f1f8e9')
+    .setFontColor('#1b5e20')
     .setFontWeight('bold')
-    .setHorizontalAlignment('center');
+    .setHorizontalAlignment('left')
+    .setVerticalAlignment('middle')
+    .setBorder(true, true, true, true, true, true, '#a5d6a7', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
 
+  // Section title
+  sh.getRange('B10:J10')
+    .setBackground('#f1f8e9')
+    .setFontColor('#1b5e20')
+    .setFontWeight('bold')
+    .setHorizontalAlignment('left')
+    .setVerticalAlignment('middle')
+    .setBorder(true, true, true, true, true, true, '#dcedc8', SpreadsheetApp.BorderStyle.SOLID);
+
+  // Table header
   sh.getRange(
     SEARCH_RECORD_CONFIG.historyHeaderRow,
     SEARCH_RECORD_CONFIG.helperStartCol,
     1,
     9
   )
-    .setBackground('#3BD97B')
-    .setFontColor('#176B39')
+    .setBackground('#e8f5e9')
+    .setFontColor('#1b5e20')
     .setFontWeight('bold')
     .setHorizontalAlignment('center')
-    .setBorder(true, true, true, true, true, true, '#CFEED9', SpreadsheetApp.BorderStyle.SOLID);
+    .setVerticalAlignment('middle')
+    .setBorder(true, true, true, true, true, true, '#c8e6c9', SpreadsheetApp.BorderStyle.SOLID);
 
+  // General font
   sh.getRange('B1:J250').setFontFamily('Arial');
-  sh.setRowHeight(1, 34);
+
+  // Row heights similar to dashboard feel
+  sh.setRowHeight(1, 32);
   sh.setRowHeight(2, 22);
+
+  for (let r = 4; r <= 7; r++) {
+    sh.setRowHeight(r, 24);
+  }
+
+  sh.setRowHeight(10, 24);
+  sh.setRowHeight(11, 24);
 }
 
 function runSearchRecord() {
@@ -237,26 +261,6 @@ function renderSearchRecord_(sheet, result, detectedField, normalizedInput) {
       9
     ).createFilter();
   }
-}
-
-function renderImagePreview_(sheet, photoLink) {
-  sheet.getRange(SEARCH_RECORD_CONFIG.previewBoxRange).clearContent();
-  sheet.getRange('G8:J16').setBackground('#F7FFF9');
-
-  if (!photoLink) {
-    sheet.getRange('G8').setValue('NO IMAGE PREVIEW');
-    return;
-  }
-
-  const directUrl = toDirectImageUrlSearch_(photoLink);
-  if (!directUrl) {
-    sheet.getRange('G8').setValue('IMAGE PREVIEW NOT AVAILABLE');
-    return;
-  }
-
-  sheet.getRange(SEARCH_RECORD_CONFIG.previewFormulaCell).setFormula(
-    '=IFERROR(IMAGE("' + escapeFormulaTextSearch_(directUrl) + '",4,220,320),"IMAGE PREVIEW NOT AVAILABLE")'
-  );
 }
 
 function applyHistoryRowColors_(sheet, matches) {
