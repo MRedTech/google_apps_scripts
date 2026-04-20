@@ -55,14 +55,13 @@ function setupSearchRecordSheet() {
 
   sh.getRange('B1:J1').merge();
   sh.getRange('B2:J2').merge();
-
   sh.getRange('C4:F4').merge();
   sh.getRange('C5:F5').merge();
   sh.getRange('C6:F6').merge();
   sh.getRange('C7:F7').merge();
   sh.getRange('B10:J10').merge();
 
-  sh.getRange('B1').setValue('SECURE ENTRY | SEARCH RECORD SENSORY');
+  sh.getRange('B1').setValue('SECURE ENTRY | SEARCH RECORD ' + getSearchSiteLabel_());
   sh.getRange('B2').setValue('REGISTER.ACCESS.SECURE');
 
   sh.getRange('B4').setValue('SEARCH INPUT');
@@ -90,12 +89,12 @@ function setupSearchRecordSheet() {
   ]]);
 
   styleSearchRecordSheet_(sh);
+  sh.getRange(SEARCH_RECORD_CONFIG.inputCell).setNumberFormat('@');
   applySearchInputPlaceholder_(sh);
   sh.getRange(SEARCH_RECORD_CONFIG.inputCell).activate();
 }
 
 function styleSearchRecordSheet_(sh) {
-  // Title
   sh.getRange('B1:J1')
     .setBackground('#e8f5e9')
     .setFontColor('#1b5e20')
@@ -104,7 +103,6 @@ function styleSearchRecordSheet_(sh) {
     .setHorizontalAlignment('left')
     .setVerticalAlignment('middle');
 
-  // Subtitle
   sh.getRange('B2:J2')
     .setBackground('#ffffff')
     .setFontColor('#558b2f')
@@ -114,7 +112,6 @@ function styleSearchRecordSheet_(sh) {
     .setHorizontalAlignment('left')
     .setVerticalAlignment('middle');
 
-  // Left labels
   sh.getRange('B4:B7')
     .setBackground('#ffffff')
     .setFontColor('#1b5e20')
@@ -122,7 +119,6 @@ function styleSearchRecordSheet_(sh) {
     .setHorizontalAlignment('left')
     .setVerticalAlignment('middle');
 
-  // Input / status / detect / total cells
   sh.getRange('C4:F7')
     .setBackground('#f1f8e9')
     .setFontColor('#1b5e20')
@@ -131,7 +127,6 @@ function styleSearchRecordSheet_(sh) {
     .setVerticalAlignment('middle')
     .setBorder(true, true, true, true, true, true, '#a5d6a7', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
 
-  // Section title
   sh.getRange('B10:J10')
     .setBackground('#f1f8e9')
     .setFontColor('#1b5e20')
@@ -140,7 +135,6 @@ function styleSearchRecordSheet_(sh) {
     .setVerticalAlignment('middle')
     .setBorder(true, true, true, true, true, true, '#dcedc8', SpreadsheetApp.BorderStyle.SOLID);
 
-  // Table header
   sh.getRange(
     SEARCH_RECORD_CONFIG.historyHeaderRow,
     SEARCH_RECORD_CONFIG.helperStartCol,
@@ -154,10 +148,7 @@ function styleSearchRecordSheet_(sh) {
     .setVerticalAlignment('middle')
     .setBorder(true, true, true, true, true, true, '#c8e6c9', SpreadsheetApp.BorderStyle.SOLID);
 
-  // General font
   sh.getRange('B1:J250').setFontFamily('Arial');
-
-  // Row heights similar to dashboard feel
   sh.setRowHeight(1, 32);
   sh.setRowHeight(2, 22);
 
@@ -171,17 +162,19 @@ function styleSearchRecordSheet_(sh) {
 
 function runSearchRecord() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const rawSheet = ss.getSheetByName(DASHBOARD_CONFIG.sourceSheetName);
+  const sourceSheetName = getSearchSourceSheetName_();
+  const rawSheet = ss.getSheetByName(sourceSheetName);
   const searchSheet = ss.getSheetByName(SEARCH_RECORD_CONFIG.sheetName);
 
-  if (!rawSheet) throw new Error('Source sheet "SENSORY" was not found.');
+  if (!rawSheet) throw new Error('Source sheet "' + sourceSheetName + '" was not found.');
   if (!searchSheet) throw new Error('Sheet "SEARCH RECORD" was not found. Please run setupSearchRecordSheet() first.');
 
-  const rawInput = safeString_(searchSheet.getRange(SEARCH_RECORD_CONFIG.inputCell).getDisplayValue());
+  const rawInputOriginal = safeString_(searchSheet.getRange(SEARCH_RECORD_CONFIG.inputCell).getDisplayValue());
+  const rawInput = stripSearchPlaceholder_(rawInputOriginal).trim();
 
   clearSearchRecordResultsOnly_(searchSheet);
 
-  if (!rawInput || isSearchInputPlaceholder_(rawInput)) {
+  if (!rawInput) {
     return;
   }
 
@@ -191,10 +184,10 @@ function runSearchRecord() {
   searchSheet.getRange(SEARCH_RECORD_CONFIG.detectCell).setValue(detectedField);
 
   const result = searchRecordsFromRawSheet_(rawSheet, detectedField, normalizedInput);
-  renderSearchRecord_(searchSheet, result, detectedField, normalizedInput);
+  renderSearchRecord_(searchSheet, result);
 }
 
-function renderSearchRecord_(sheet, result, detectedField, normalizedInput) {
+function renderSearchRecord_(sheet, result) {
   sheet.getRange(SEARCH_RECORD_CONFIG.totalMatchCell).setValue(result.matches.length);
 
   if (!result.matches.length) {
@@ -241,6 +234,10 @@ function renderSearchRecord_(sheet, result, detectedField, normalizedInput) {
 
     sheet.getRange(startRow, startCol, values.length, 1)
       .setNumberFormat('dd/MM/yyyy HH:mm:ss')
+      .setHorizontalAlignment('left');
+
+    sheet.getRange(startRow, startCol + 2, values.length, 1)
+      .setNumberFormat('@')
       .setHorizontalAlignment('left');
 
     sheet.getRange(startRow, startCol + 4, values.length, 1)
@@ -358,6 +355,7 @@ function clearSearchRecord() {
   if (!sheet) return;
 
   sheet.getRange(SEARCH_RECORD_CONFIG.inputCell).clearContent();
+  sheet.getRange(SEARCH_RECORD_CONFIG.inputCell).setNumberFormat('@');
   clearSearchRecordResultsOnly_(sheet);
   applySearchInputPlaceholder_(sheet);
 }
@@ -395,32 +393,6 @@ function extractUrlFromHyperlinkFormulaSearch_(formula) {
 
   const match = text.match(/^=HYPERLINK\("([^"]+)"/i);
   return match ? match[1].trim() : '';
-}
-
-function toDirectImageUrlSearch_(url) {
-  const raw = safeString_(url);
-  if (!raw) return '';
-
-  const fileId = extractDriveFileIdSearch_(raw);
-  if (fileId) {
-    return 'https://drive.google.com/uc?export=view&id=' + fileId;
-  }
-
-  if (/^https?:\/\//i.test(raw)) return raw;
-  return '';
-}
-
-function extractDriveFileIdSearch_(url) {
-  const text = safeString_(url);
-  if (!text) return '';
-
-  let match = text.match(/\/d\/([a-zA-Z0-9_-]+)/);
-  if (match) return match[1];
-
-  match = text.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-  if (match) return match[1];
-
-  return '';
 }
 
 function colorSearchStatusCell_(range, status) {
@@ -472,41 +444,6 @@ function detectSearchFieldSearchRecord_(raw) {
   return /[A-Z]/.test(alnumOnly) ? 'REGNUM' : 'MYKADPASSPORT';
 }
 
-function onSelectionChange(e) {
-  try {
-    if (!e || !e.range) return;
-
-    const sheet = e.range.getSheet();
-    if (sheet.getName() !== SEARCH_RECORD_CONFIG.sheetName) return;
-
-    const inputRange = sheet.getRange(SEARCH_RECORD_CONFIG.inputCell);
-    const selectedA1 = e.range.getA1Notation();
-    const inputValue = String(inputRange.getDisplayValue() || '').trim();
-
-    // Bila user pilih/tap C4, placeholder terus hilang
-    if (selectedA1 === SEARCH_RECORD_CONFIG.inputCell) {
-      if (isSearchInputPlaceholder_(inputValue)) {
-        inputRange.clearContent();
-      }
-
-      inputRange
-        .setFontColor('#000000')
-        .setFontStyle('normal')
-        .setHorizontalAlignment('left');
-
-      return;
-    }
-
-    // Bila user keluar dari C4 dan cell kosong, placeholder muncul balik
-    if (!inputValue) {
-      applySearchInputPlaceholder_(sheet);
-    }
-
-  } catch (err) {
-    Logger.log('onSelectionChange error: ' + err);
-  }
-}
-
 function isSearchInputPlaceholder_(value) {
   return safeUpper_(value) === SEARCH_INPUT_PLACEHOLDER;
 }
@@ -514,6 +451,8 @@ function isSearchInputPlaceholder_(value) {
 function applySearchInputPlaceholder_(sheet) {
   const range = sheet.getRange(SEARCH_RECORD_CONFIG.inputCell);
   const current = safeString_(range.getDisplayValue());
+
+  range.setNumberFormat('@');
 
   if (!current) {
     range
@@ -528,6 +467,8 @@ function clearSearchInputPlaceholder_(sheet) {
   const range = sheet.getRange(SEARCH_RECORD_CONFIG.inputCell);
   const current = safeString_(range.getDisplayValue());
 
+  range.setNumberFormat('@');
+
   if (isSearchInputPlaceholder_(current)) {
     range.clearContent();
   }
@@ -540,6 +481,7 @@ function clearSearchInputPlaceholder_(sheet) {
 
 function setSearchInputActiveStyle_(sheet) {
   sheet.getRange(SEARCH_RECORD_CONFIG.inputCell)
+    .setNumberFormat('@')
     .setFontColor('#000000')
     .setFontStyle('normal')
     .setHorizontalAlignment('left');
@@ -566,4 +508,15 @@ function stripSearchPlaceholder_(value) {
 
   const escaped = placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return text.replace(new RegExp('^\\s*' + escaped + '\\s*', 'i'), '');
+}
+
+function getSearchSourceSheetName_() {
+  if (typeof DASHBOARD_CONFIG !== 'undefined' && DASHBOARD_CONFIG.sourceSheetName) {
+    return String(DASHBOARD_CONFIG.sourceSheetName).trim();
+  }
+  return 'SENSORY';
+}
+
+function getSearchSiteLabel_() {
+  return safeUpper_(getSearchSourceSheetName_());
 }
