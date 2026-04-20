@@ -2,7 +2,7 @@ const DASHBOARD_CONFIG = {
   sourceSheetName: 'SENSORY',
   dashboardSheetName: 'DASHBOARD',
   timezone: 'Asia/Kuala_Lumpur',
-  headerTitle: 'SECURE ENTRY | DASHBOARD SENSORY',
+  headerTitle: 'SECURE ENTRY DASHBOARD | SENSORY',
   headerSubtitle: 'REGISTER.ACCESS.SECURE',
   filterStartCell: 'B3',
   filterEndCell: 'D3',
@@ -46,7 +46,11 @@ const ACTIVE_GROUPS = [
 const TOWER_GROUP_ORDER = ACTIVE_GROUPS.slice();
 
 function onOpen() {
-  hideSensitiveSheets_();
+  try {
+    hideSensitiveSheets_();
+  } catch (err) {
+    Logger.log('onOpen error: ' + err);
+  }
 }
 
 function buildDashboard() {
@@ -57,9 +61,7 @@ function buildDashboard() {
   const dashboardSheet = getOrCreateSheet_(ss, DASHBOARD_CONFIG.dashboardSheetName);
   initializeDashboardLayout_(dashboardSheet, sourceSheet);
   refreshDashboard();
-  applyDashboardProtection_();
-  applySensoryProtection_();
-  hideSensitiveSheets_();
+  enforceOpenSecurity_();
 }
 
 function refreshDashboard() {
@@ -993,48 +995,196 @@ function onEdit(e) {
     const sheetName = sheet.getName();
     const a1 = e.range.getA1Notation();
 
-    // DASHBOARD FILTER
+    // =========================
+    // DASHBOARD FILTER LOGIC
+    // =========================
     if (sheetName === DASHBOARD_CONFIG.dashboardSheetName) {
       const isStart = a1 === DASHBOARD_CONFIG.filterStartCell;
       const isEnd = a1 === DASHBOARD_CONFIG.filterEndCell;
 
       if (!isStart && !isEnd) return;
 
-      refreshDashboard();
+      // Re-apply date filter styling and format
       styleFilterCell_(sheet.getRange(DASHBOARD_CONFIG.filterStartCell));
       styleFilterCell_(sheet.getRange(DASHBOARD_CONFIG.filterEndCell));
+
       sheet.getRange(DASHBOARD_CONFIG.filterStartCell).setNumberFormat('dd/MM/yyyy');
       sheet.getRange(DASHBOARD_CONFIG.filterEndCell).setNumberFormat('dd/MM/yyyy');
+
+      // Refresh ONLY when End Date (D3) is edited
+      if (isEnd) {
+        PropertiesService.getDocumentProperties().setProperty('SE_ENDDATE_EDITED', '1');
+        refreshDashboard();
+        SpreadsheetApp.flush();
+      }
+
       return;
     }
 
-    // SEARCH RECORD INPUT
+    // =========================
+    // SEARCH RECORD INPUT LOGIC
+    // =========================
     if (
       typeof SEARCH_RECORD_CONFIG !== 'undefined' &&
       sheetName === SEARCH_RECORD_CONFIG.sheetName &&
       a1 === SEARCH_RECORD_CONFIG.inputCell
     ) {
-      let rawValue = String(e.range.getDisplayValue() || '');
-      let value = stripSearchPlaceholder_(rawValue).trim().toUpperCase();
+      const inputRange = e.range;
+
+      // Force text format to preserve leading zero
+      inputRange.setNumberFormat('@');
+
+      let rawValue = String(inputRange.getDisplayValue() || '');
+      let value = (typeof stripSearchPlaceholder_ === 'function'
+        ? stripSearchPlaceholder_(rawValue)
+        : rawValue
+      ).trim().toUpperCase();
 
       if (!value) {
-        clearSearchRecord();
-        applySearchInputPlaceholder_(sheet);
+        if (typeof clearSearchRecord === 'function') clearSearchRecord();
+        if (typeof applySearchInputPlaceholder_ === 'function') applySearchInputPlaceholder_(sheet);
         return;
       }
 
       if (rawValue !== value) {
-        e.range.setValue(value);
+        inputRange.setValue(value);
       }
 
-      setSearchInputActiveStyle_(sheet);
-      runSearchRecord();
+      if (typeof setSearchInputActiveStyle_ === 'function') {
+        setSearchInputActiveStyle_(sheet);
+      }
+
+      if (typeof runSearchRecord === 'function') {
+        runSearchRecord();
+      }
+
       return;
     }
 
   } catch (err) {
     Logger.log('onEdit error: ' + err);
   }
+}
+
+function onSelectionChange(e) {
+  try {
+    if (!e || !e.range) return;
+
+    const props = PropertiesService.getDocumentProperties();
+    const sheet = e.range.getSheet();
+    const sheetName = sheet.getName();
+    const currentA1 = e.range.getA1Notation();
+
+    // =========================
+    // DASHBOARD SELECTION LOGIC
+    // =========================
+    if (sheetName === DASHBOARD_CONFIG.dashboardSheetName) {
+      const endCell = DASHBOARD_CONFIG.filterEndCell;
+      const lastSelection = props.getProperty('SE_LAST_SELECTION_A1') || '';
+      const endEdited = props.getProperty('SE_ENDDATE_EDITED') === '1';
+
+      // Arm refresh when user selects End Date cell
+      if (currentA1 === endCell) {
+        props.setProperty('SE_ENDDATE_ARMED', '1');
+        props.setProperty('SE_LAST_SELECTION_A1', currentA1);
+        return;
+      }
+
+      // Refresh when user leaves End Date cell even if date is same
+      if (lastSelection === endCell && props.getProperty('SE_ENDDATE_ARMED') === '1') {
+        props.deleteProperty('SE_ENDDATE_ARMED');
+        props.setProperty('SE_LAST_SELECTION_A1', currentA1);
+
+        // Skip duplicate refresh if onEdit already handled it
+        if (endEdited) {
+          props.deleteProperty('SE_ENDDATE_EDITED');
+          return;
+        }
+
+        styleFilterCell_(sheet.getRange(DASHBOARD_CONFIG.filterStartCell));
+        styleFilterCell_(sheet.getRange(DASHBOARD_CONFIG.filterEndCell));
+
+        sheet.getRange(DASHBOARD_CONFIG.filterStartCell).setNumberFormat('dd/MM/yyyy');
+        sheet.getRange(DASHBOARD_CONFIG.filterEndCell).setNumberFormat('dd/MM/yyyy');
+
+        refreshDashboard();
+        SpreadsheetApp.flush();
+        return;
+      }
+
+      if (endEdited) {
+        props.deleteProperty('SE_ENDDATE_EDITED');
+      }
+
+      props.setProperty('SE_LAST_SELECTION_A1', currentA1);
+      return;
+    }
+
+    // =========================
+    // SEARCH RECORD SELECTION LOGIC
+    // =========================
+    if (
+      typeof SEARCH_RECORD_CONFIG !== 'undefined' &&
+      sheetName === SEARCH_RECORD_CONFIG.sheetName
+    ) {
+      const inputRange = sheet.getRange(SEARCH_RECORD_CONFIG.inputCell);
+      const inputValue = String(inputRange.getDisplayValue() || '').trim();
+
+      if (currentA1 === SEARCH_RECORD_CONFIG.inputCell) {
+        inputRange.setNumberFormat('@');
+
+        if (typeof isSearchInputPlaceholder_ === 'function' && isSearchInputPlaceholder_(inputValue)) {
+          inputRange.clearContent();
+        }
+
+        inputRange
+          .setFontColor('#000000')
+          .setFontStyle('normal')
+          .setHorizontalAlignment('left');
+
+        return;
+      }
+
+      if (!inputValue) {
+        if (typeof applySearchInputPlaceholder_ === 'function') {
+          applySearchInputPlaceholder_(sheet);
+        }
+      }
+
+      return;
+    }
+
+    // Reset dashboard state when user moves to other sheets
+    props.deleteProperty('SE_LAST_SELECTION_A1');
+    props.deleteProperty('SE_ENDDATE_ARMED');
+    props.deleteProperty('SE_ENDDATE_EDITED');
+
+  } catch (err) {
+    Logger.log('onSelectionChange error: ' + err);
+  }
+}
+
+function enforceOpenSecurity_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const dashboardSheet = ss.getSheetByName(DASHBOARD_CONFIG.dashboardSheetName);
+  const sensorySheet = ss.getSheetByName(DASHBOARD_CONFIG.sourceSheetName);
+
+  applyDashboardProtection_();
+  applySensoryProtection_();
+
+  if (sensorySheet && !sensorySheet.isSheetHidden()) {
+    sensorySheet.hideSheet();
+  }
+
+  if (dashboardSheet) {
+    styleFilterCell_(dashboardSheet.getRange(DASHBOARD_CONFIG.filterStartCell));
+    styleFilterCell_(dashboardSheet.getRange(DASHBOARD_CONFIG.filterEndCell));
+
+    dashboardSheet.getRange(DASHBOARD_CONFIG.filterStartCell).setNumberFormat('dd/MM/yyyy');
+    dashboardSheet.getRange(DASHBOARD_CONFIG.filterEndCell).setNumberFormat('dd/MM/yyyy');
+  }
+
+  SpreadsheetApp.flush();
 }
 
 function applyDashboardProtection_() {
@@ -1070,14 +1220,14 @@ function applyDashboardProtection_() {
 function applySensoryProtection_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(DASHBOARD_CONFIG.sourceSheetName);
-  if (!sheet) throw new Error("Source sheet 'SENSORY' was not found.");
+  if (!sheet) throw new Error("Sensory sheet was not found.");
 
   const protections = sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET);
   protections.forEach(p => {
     if (p.canEdit()) p.remove();
   });
 
-  const protection = sheet.protect().setDescription('Lock full SENSORY sheet');
+  const protection = sheet.protect().setDescription('Lock sensory sheet');
 
   const me = Session.getEffectiveUser();
   protection.addEditor(me);
@@ -1095,9 +1245,9 @@ function applySensoryProtection_() {
 function hideSensitiveSheets_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
 
-  const sensorySheet = ss.getSheetByName(DASHBOARD_CONFIG.sourceSheetName);
+  const rawSheet = ss.getSheetByName(DASHBOARD_CONFIG.sourceSheetName);
   const dashboardSheet = ss.getSheetByName(DASHBOARD_CONFIG.dashboardSheetName);
-  const searchSheet =
+  const searchRecordSheet =
     (typeof SEARCH_RECORD_CONFIG !== 'undefined' && SEARCH_RECORD_CONFIG.sheetName)
       ? ss.getSheetByName(SEARCH_RECORD_CONFIG.sheetName)
       : null;
@@ -1106,11 +1256,11 @@ function hideSensitiveSheets_() {
     dashboardSheet.showSheet();
   }
 
-  if (searchSheet && searchSheet.isSheetHidden()) {
-    searchSheet.showSheet();
+  if (searchRecordSheet && searchRecordSheet.isSheetHidden()) {
+    searchRecordSheet.showSheet();
   }
 
-  if (sensorySheet && !sensorySheet.isSheetHidden()) {
-    sensorySheet.hideSheet();
+  if (rawSheet && !rawSheet.isSheetHidden()) {
+    rawSheet.hideSheet();
   }
 }
