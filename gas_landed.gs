@@ -1,5 +1,5 @@
 // ==================================================
-// SECURE ENTRY - SENSORY (BACKEND - SEARCH + SYNC MIRROR)
+// SECURE ENTRY - M PANORA (BACKEND - SEARCH + SYNC MIRROR)
 // ==================================================
 // doPost: SYNC from Worker
 //   - NEW (NO_RECORD / EXPIRED): imageViewUrl -> fetch image -> Drive
@@ -12,12 +12,12 @@
 //   - EXPIRED = anyRow exists BUT no proof photo (or proof outside retention window)
 // ==================================================
 
-const SHEET_NAME = "SENSORY";
+const SHEET_NAME = "M PANORA";
 // If this Apps Script is standalone (not bound to the Sheet), set SPREADSHEET_ID.
 // Optional override: set Script Property "SPREADSHEET_ID".
-const SPREADSHEET_ID_FALLBACK = "1lfThC9DkZnCF0NWW0wJ9FP2W0DeTy8qpTPgD1dKil-I";
-const DRIVE_FOLDER_ID = "1lrjbyVWGcBCEQE5vc08qPty14Yn5-HaI";
-const SYNC_TOKEN = "SE_SYNC_9f3c1a7b2d4e6f8091ab3cd5ef678901R";
+const SPREADSHEET_ID_FALLBACK = "1735V4dUitUhWjqpdmXtK_mQPGybXqwaQsmk1RnPeA6o";
+const DRIVE_FOLDER_ID = "1T5mwzvY9fmF_5i89HWIv4bBhTzjr2n4C";
+const SYNC_TOKEN = "MP_SYNC_9f3c1a7b2d4e6f8091ab3cd5ef678901R";
 
 // Cache keys (compact string - avoid size limit)
 const KEY_REG  = "IDX_REG_V2";
