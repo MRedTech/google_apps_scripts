@@ -1167,13 +1167,13 @@ function onSelectionChange(e) {
 function enforceOpenSecurity_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const dashboardSheet = ss.getSheetByName(DASHBOARD_CONFIG.dashboardSheetName);
-  const sensorySheet = ss.getSheetByName(DASHBOARD_CONFIG.sourceSheetName);
+  const cerradoSheet = ss.getSheetByName(DASHBOARD_CONFIG.sourceSheetName);
 
   applyDashboardProtection_();
-  applySensoryProtection_();
+  applyCerradoProtection_();
 
-  if (sensorySheet && !sensorySheet.isSheetHidden()) {
-    sensorySheet.hideSheet();
+  if (cerradoSheet && !cerradoSheet.isSheetHidden()) {
+    cerradoSheet.hideSheet();
   }
 
   if (dashboardSheet) {
