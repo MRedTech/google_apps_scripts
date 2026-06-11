@@ -1,5 +1,5 @@
 // ==================================================
-// SECURE ENTRY - (BACKEND - SEARCH + SYNC MIRROR)
+// SECURE ENTRY - CERRADO (BACKEND - SEARCH + SYNC MIRROR)
 // ==================================================
 // doPost: SYNC from Worker
 //   - NEW (NO_RECORD / EXPIRED): imageViewUrl -> fetch image -> Drive
@@ -462,28 +462,30 @@ function buildIndexCache_() {
 // { token, namePassport, mykadPassport, regnum, contact, remark, unitNumber, tower, reason, reasonOther, imageViewUrl }
 // ==================================================
 function doPost(e) {
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
+  let data = {};
+  let driveFileId = "";
+  let photoUrl = "";
+  let rowCommitted = false;
+  let lock = null;
+  let lockTaken = false;
 
   try {
-    const sheet = getSheet_();
-
-    let data = {};
     try {
       data = JSON.parse(e.postData && e.postData.contents ? e.postData.contents : "{}");
     } catch (err) {
-      return output_({ success: false, error: true, message: "Invalid JSON: " + err.message });
+      return output_({ success: false, error: true, retryable: false, message: "Invalid JSON: " + err.message });
     }
 
     if (toText_(data.token) !== SYNC_TOKEN) {
-      return output_({ success: false, error: true, message: "Unauthorized" });
+      return output_({ success: false, error: true, retryable: false, message: "Unauthorized" });
     }
+
+    const action = toText_(data.action).toUpperCase();
 
     // =========================
     // Action: DELETE_DRIVE (from Worker scheduled cleanup)
     // Payload: { token, action:"DELETE_DRIVE", fileIds:[...] }
     // =========================
-    const action = toText_(data.action).toUpperCase();
     if (action === "DELETE_DRIVE") {
       const ids = (data.fileIds && Array.isArray(data.fileIds)) ? data.fileIds : [];
       let deletedCount = 0;
@@ -507,11 +509,20 @@ function doPost(e) {
     // Payload: { token, action:"CLEANUP_AGE" }
     // =========================
     if (action === "CLEANUP_AGE") {
+      lock = LockService.getScriptLock();
+      try {
+        lock.waitLock(15000);
+        lockTaken = true;
+      } catch (lockErr) {
+        return output_({ success: false, error: true, retryable: true, message: "Server busy: cleanup lock timeout" });
+      }
+
+      const sheet = getSheet_();
       const did = cleanupByAge_(sheet, RETENTION_DAYS);
       if (did) {
         const cache2 = CacheService.getScriptCache();
-        cache2.remove(KEY_REG);
-        cache2.remove(KEY_ID);
+        cacheRemoveChunked_(cache2, KEY_REG);
+        cacheRemoveChunked_(cache2, KEY_ID);
         cache2.remove(KEY_META);
       }
       return output_({ success: true, action: "CLEANUP_AGE", cleaned: !!did });
@@ -521,20 +532,28 @@ function doPost(e) {
 
     // =========================
     // Idempotency (prevent duplicate rows on Worker retry)
+    // - Cache stores driveFileId/driveUrl so Worker can still update D1 on duplicate retry.
     // =========================
     const reqId = toText_(data.id);
     const doneKey = reqId ? ("SYNCED_ID_" + reqId) : "";
-    if (doneKey && cache.get(doneKey)) {
-      return output_({ success: true, duplicate: true });
+    const doneRaw = doneKey ? cache.get(doneKey) : "";
+    if (doneRaw) {
+      let doneObj = {};
+      try { doneObj = JSON.parse(doneRaw || "{}"); } catch (e1) { doneObj = {}; }
+      return output_({
+        success: true,
+        duplicate: true,
+        driveFileId: toText_(doneObj.driveFileId),
+        driveUrl: toText_(doneObj.driveUrl)
+      });
     }
 
     // =========================
     // Photo strategy
     // - If imageViewUrl exists, it MUST be fetched successfully, otherwise FAIL (Worker will retry)
     // - We only create proof (hyperlink + col I) when NEW photo is stored
+    // - Image fetch/upload is done BEFORE lock to reduce Sheet lock time.
     // =========================
-    let photoUrl = "";
-    let driveFileId = "";
     const imageViewUrl = toText_(data.imageViewUrl);
 
     if (imageViewUrl) {
@@ -594,12 +613,7 @@ function doPost(e) {
     const now = new Date();
     const photoLinkColI = shouldCreateHyperlink ? photoUrl : "";
 
-    // =========================
-    // Write row (single batch write for speed)
-    // =========================
-    const newRow = sheet.getLastRow() + 1;
-
-    sheet.getRange(newRow, 1, 1, 9).setValues([[
+    const rowValues = [[
       formatDateTimeDMY(now),            // A TIMESTAMP
       nameCellValue,                     // B NAME (formula OR text)
       normalizeText(data.mykadPassport), // C MYKAD/PASSPORT
@@ -609,73 +623,110 @@ function doPost(e) {
       normalizeText(data.tower),         // G TOWER
       reasonValue,                       // H REASON
       photoLinkColI                      // I PHOTO LINK (proof only)
-    ]]);
+    ]];
 
     // =========================
-    // Auto delete (rolling)
+    // Critical section: write Sheet + cache update only
     // =========================
-    const ageDeleted = cleanupByAge_(sheet, RETENTION_DAYS);
-    // No MAX ROW rolling deletion: Google Sheet is not limited by row count.
-    const deleted = ageDeleted;
-
-
-    // =========================
-    // Cache handling
-    // =========================
-    if (deleted) {
-      // Required by Edos: clear cache when autoDelete happens
-      cacheRemoveChunked_(cache, KEY_REG);
-      cacheRemoveChunked_(cache, KEY_ID);
-      cache.remove(KEY_META);
-
-      // Rebuild now so next search stays fast
-      const idx = buildIndexCache_();
-      const metaNow = metaSig_(sheet);
-      cachePutChunked_(cache, KEY_REG, idx.reg || "", CACHE_TTL);
-      cachePutChunked_(cache, KEY_ID, idx.id || "", CACHE_TTL);
-      cache.put(KEY_META, metaNow, CACHE_TTL);
-    } else {
-      // Incremental update (no row shifting)
-      let regStr = cacheGetChunked_(cache, KEY_REG);
-      let idStr = cacheGetChunked_(cache, KEY_ID);
-
-      // If cache missing, build once
-      if (regStr === null || idStr === null) {
-        const idx2 = buildIndexCache_();
-        regStr = idx2.reg || "";
-        idStr = idx2.id || "";
-      }
-
-      const regKey = normKey_(data.regnum);
-      const idKey = normKey_(data.mykadPassport);
-
-      // Keep old actRow unless this is a NEW proof row
-      if (regKey) {
-        const old = resolveCompact_(regKey, regStr);
-        const actRow = shouldCreateHyperlink ? newRow : (old.actRow || 0);
-        regStr = upsertCompactLine_(regStr, regKey, newRow, actRow);
-      }
-
-      if (idKey) {
-        const old2 = resolveCompact_(idKey, idStr);
-        const actRow2 = shouldCreateHyperlink ? newRow : (old2.actRow || 0);
-        idStr = upsertCompactLine_(idStr, idKey, newRow, actRow2);
-      }
-
-      const metaNow2 = metaSig_(sheet);
-      cachePutChunked_(cache, KEY_REG, regStr || "", CACHE_TTL);
-      cachePutChunked_(cache, KEY_ID, idStr || "", CACHE_TTL);
-      cache.put(KEY_META, metaNow2, CACHE_TTL);
+    lock = LockService.getScriptLock();
+    try {
+      lock.waitLock(15000);
+      lockTaken = true;
+    } catch (lockErr) {
+      throw new Error("Server busy: sync lock timeout");
     }
 
-    // Mark idempotency key last (only when everything is OK)
-    if (doneKey) cache.put(doneKey, "1", 21600); // 6 hours
+    const sheet = getSheet_();
+    const newRow = sheet.getLastRow() + 1;
+    sheet.getRange(newRow, 1, 1, 9).setValues(rowValues);
+    rowCommitted = true;
 
-    return output_({ success: true, deleted: !!deleted, driveFileId: driveFileId, driveUrl: photoUrl });
+    let deleted = false;
+    let warning = "";
+
+    try {
+      // =========================
+      // Auto delete (rolling)
+      // =========================
+      deleted = cleanupByAge_(sheet, RETENTION_DAYS);
+
+      // =========================
+      // Cache handling
+      // =========================
+      if (deleted) {
+        // Required by Edos: clear cache when autoDelete happens
+        cacheRemoveChunked_(cache, KEY_REG);
+        cacheRemoveChunked_(cache, KEY_ID);
+        cache.remove(KEY_META);
+
+        // Rebuild now so next search stays fast
+        const idx = buildIndexCache_();
+        const metaNow = metaSig_(sheet);
+        cachePutChunked_(cache, KEY_REG, idx.reg || "", CACHE_TTL);
+        cachePutChunked_(cache, KEY_ID, idx.id || "", CACHE_TTL);
+        cache.put(KEY_META, metaNow, CACHE_TTL);
+      } else {
+        // Incremental update (no row shifting)
+        let regStr = cacheGetChunked_(cache, KEY_REG);
+        let idStr = cacheGetChunked_(cache, KEY_ID);
+
+        // If cache missing, build once
+        if (regStr === null || idStr === null) {
+          const idx2 = buildIndexCache_();
+          regStr = idx2.reg || "";
+          idStr = idx2.id || "";
+        }
+
+        const regKey = normKey_(data.regnum);
+        const idKey = normKey_(data.mykadPassport);
+
+        // Keep old actRow unless this is a NEW proof row
+        if (regKey) {
+          const old = resolveCompact_(regKey, regStr);
+          const actRow = shouldCreateHyperlink ? newRow : (old.actRow || 0);
+          regStr = upsertCompactLine_(regStr, regKey, newRow, actRow);
+        }
+
+        if (idKey) {
+          const old2 = resolveCompact_(idKey, idStr);
+          const actRow2 = shouldCreateHyperlink ? newRow : (old2.actRow || 0);
+          idStr = upsertCompactLine_(idStr, idKey, newRow, actRow2);
+        }
+
+        const metaNow2 = metaSig_(sheet);
+        cachePutChunked_(cache, KEY_REG, regStr || "", CACHE_TTL);
+        cachePutChunked_(cache, KEY_ID, idStr || "", CACHE_TTL);
+        cache.put(KEY_META, metaNow2, CACHE_TTL);
+      }
+    } catch (cacheErr) {
+      // Row is already safely written. Do not fail sync and cause duplicate retry.
+      warning = "Sheet row saved; cache cleanup/update warning: " + cacheErr.message;
+    }
+
+    // Mark idempotency key last (best-effort, after row exists)
+    if (doneKey) {
+      try {
+        cache.put(doneKey, JSON.stringify({ driveFileId: driveFileId, driveUrl: photoUrl }), 21600); // 6 hours
+      } catch (e2) {}
+    }
+
+    return output_({
+      success: true,
+      deleted: !!deleted,
+      driveFileId: driveFileId,
+      driveUrl: photoUrl,
+      warning: warning
+    });
   } catch (err) {
-    return output_({ success: false, error: true, message: err.message });
+    // Avoid orphaned Drive image if image uploaded but row not written.
+    if (driveFileId && !rowCommitted) {
+      try { DriveApp.getFileById(driveFileId).setTrashed(true); } catch (e3) {}
+    }
+    return output_({ success: false, error: true, retryable: true, message: err.message || String(err) });
   } finally {
-    try { lock.releaseLock(); } catch (e) {}
+    if (lockTaken && lock) {
+      try { lock.releaseLock(); } catch (e4) {}
+    }
   }
 }
 
