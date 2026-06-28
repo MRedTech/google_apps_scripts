@@ -4,10 +4,19 @@ const SEARCH_RECORD_CONFIG = {
   statusCell: 'C5',
   detectCell: 'C6',
   totalMatchCell: 'C7',
+  actionClearCell: 'F7',
+  actionClearLabelRange: 'G7:H7',
+  activeAfterActionCell: 'B1',
+  editableRanges: ['C4:E4', 'F7'],
+  protectionDescription: 'SECURE ENTRY SEARCH RECORD LOCK',
   historyTitleRow: 10,
   historyHeaderRow: 11,
   historyStartRow: 12,
   helperStartCol: 2,
+  historyLeftStartCol: 2,
+  historyLeftColumnCount: 4,
+  historyRightStartCol: 7,
+  historyRightColumnCount: 5,
   historyColumnCount: 9,
   maxDisplayRows: 300
 };
@@ -39,6 +48,7 @@ function setupSearchRecordSheet() {
   }
 
   sh.getRange('A1:O400').breakApart();
+  sh.getRange('A1:O400').clearDataValidations();
   sh.setHiddenGridlines(true);
   sh.setFrozenRows(4);
 
@@ -47,19 +57,23 @@ function setupSearchRecordSheet() {
   sh.setColumnWidth(3, 210);
   sh.setColumnWidth(4, 180);
   sh.setColumnWidth(5, 180);
-  sh.setColumnWidth(6, 180);
-  sh.setColumnWidth(7, 180);
-  sh.setColumnWidth(8, 150);
-  sh.setColumnWidth(9, 130);
-  sh.setColumnWidth(10, 140);
+  sh.setColumnWidth(6, 24); // dedicated narrow checkbox / spacer column, same concept as dashboard
+  sh.setColumnWidth(7, 170);
+  sh.setColumnWidth(8, 180);
+  sh.setColumnWidth(9, 150);
+  sh.setColumnWidth(10, 130);
+  sh.setColumnWidth(11, 140);
 
-  sh.getRange('B1:J1').merge();
-  sh.getRange('B2:J2').merge();
-  sh.getRange('C4:F4').merge();
-  sh.getRange('C5:F5').merge();
-  sh.getRange('C6:F6').merge();
-  sh.getRange('C7:F7').merge();
-  sh.getRange('B10:J10').merge();
+  sh.getRange('B1:K1').merge();
+  sh.getRange('B2:K2').merge();
+  sh.getRange('C4:E4').merge();
+  sh.getRange('C5:E5').merge();
+  sh.getRange('C6:E6').merge();
+  sh.getRange('C7:E7').merge();
+  sh.getRange('G7:H7').merge();
+  sh.getRange('B10:K10').merge();
+
+  clearSearchRecordHeaderValidation_(sh);
 
   sh.getRange('B1').setValue('SECURE ENTRY | SEARCH RECORD ' + getSearchSiteLabel_());
   sh.getRange('B2').setValue('REGISTER.ACCESS.SECURE');
@@ -70,32 +84,94 @@ function setupSearchRecordSheet() {
   sh.getRange('B7').setValue('TOTAL MATCH');
 
   sh.getRange('B10').setValue('MATCHING ENTRY RECORDS');
+  sh.getRange('G7').setValue('CLEAR SEARCH');
 
-  sh.getRange(
-    SEARCH_RECORD_CONFIG.historyHeaderRow,
-    SEARCH_RECORD_CONFIG.helperStartCol,
-    1,
-    9
-  ).setValues([[
-    'TIMESTAMP',
-    'NAME',
-    'MYKAD / PASSPORT',
-    'REGISTRATION NUMBER',
-    'CONTACT',
-    'CATEGORY',
-    'TOWER',
-    'REASON',
-    'PHOTO LINK'
-  ]]);
+  sh.getRange(SEARCH_RECORD_CONFIG.historyHeaderRow, SEARCH_RECORD_CONFIG.historyLeftStartCol, 1, SEARCH_RECORD_CONFIG.historyLeftColumnCount)
+    .setValues([[
+      'TIMESTAMP',
+      'NAME',
+      'MYKAD / PASSPORT',
+      'REG.NUM'
+    ]]);
+
+  sh.getRange('F11:G11')
+    .merge()
+    .setValue('CONTACT');
+
+  sh.getRange(SEARCH_RECORD_CONFIG.historyHeaderRow, 8, 1, 4)
+    .setValues([[
+      'CATEGORY',
+      'TOWER',
+      'REASON',
+      'PHOTO LINK'
+    ]]);
 
   styleSearchRecordSheet_(sh);
+  setupSearchRecordActionCheckboxes_(sh);
   sh.getRange(SEARCH_RECORD_CONFIG.inputCell).setNumberFormat('@');
   applySearchInputPlaceholder_(sh);
+  applySearchRecordSheetProtection_(sh);
   sh.getRange(SEARCH_RECORD_CONFIG.inputCell).activate();
 }
 
+function clearSearchRecordHeaderValidation_(sheet) {
+  // Keep header/title area free from any old checkbox/data-validation rules.
+  // This prevents Google Sheets on tablet from showing validation errors when B1 is activated.
+  sheet.getRangeList([
+    'B1:K1',
+    'B2:K2',
+    'B10:K10'
+  ]).clearDataValidations();
+}
+
+
+function applySearchRecordSheetProtection_(sheet) {
+  // Lock the SEARCH RECORD sheet and leave only the agreed user input cells editable:
+  // C4:E4 = SEARCH INPUT, F7 = CLEAR SEARCH checkbox.
+  const editableRanges = SEARCH_RECORD_CONFIG.editableRanges.map(function (a1) {
+    return sheet.getRange(a1);
+  });
+
+  // Remove old protections only on this SEARCH RECORD sheet before applying the current rule.
+  // This prevents outdated protected ranges from blocking C4:E4 or F7.
+  try {
+    sheet.getProtections(SpreadsheetApp.ProtectionType.RANGE).forEach(function (protection) {
+      protection.remove();
+    });
+  } catch (err) {}
+
+  try {
+    sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(function (protection) {
+      protection.remove();
+    });
+  } catch (err) {}
+
+  const protection = sheet.protect().setDescription(SEARCH_RECORD_CONFIG.protectionDescription);
+  protection.setWarningOnly(false);
+  protection.setUnprotectedRanges(editableRanges);
+
+  // Keep the script runner as the sheet-protection editor, then remove other editors
+  // from this protection only. Spreadsheet sharing itself is not changed.
+  try {
+    const me = Session.getEffectiveUser();
+    protection.addEditor(me);
+
+    protection.getEditors().forEach(function (editor) {
+      if (editor.getEmail && editor.getEmail() !== me.getEmail()) {
+        protection.removeEditor(editor);
+      }
+    });
+
+    if (protection.canDomainEdit()) {
+      protection.setDomainEdit(false);
+    }
+  } catch (err) {
+    Logger.log('Search Record protection editor cleanup skipped: ' + err);
+  }
+}
+
 function styleSearchRecordSheet_(sh) {
-  sh.getRange('B1:J1')
+  sh.getRange('B1:K1')
     .setBackground('#e8f5e9')
     .setFontColor('#1b5e20')
     .setFontWeight('bold')
@@ -103,7 +179,7 @@ function styleSearchRecordSheet_(sh) {
     .setHorizontalAlignment('left')
     .setVerticalAlignment('middle');
 
-  sh.getRange('B2:J2')
+  sh.getRange('B2:K2')
     .setBackground('#ffffff')
     .setFontColor('#558b2f')
     .setFontStyle('italic')
@@ -119,7 +195,7 @@ function styleSearchRecordSheet_(sh) {
     .setHorizontalAlignment('left')
     .setVerticalAlignment('middle');
 
-  sh.getRange('C4:F7')
+  sh.getRange('C4:E7')
     .setBackground('#f1f8e9')
     .setFontColor('#1b5e20')
     .setFontWeight('bold')
@@ -127,20 +203,15 @@ function styleSearchRecordSheet_(sh) {
     .setVerticalAlignment('middle')
     .setBorder(true, true, true, true, true, true, '#a5d6a7', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
 
-  sh.getRange('B10:J10')
+  sh.getRange('B10:K10')
     .setBackground('#f1f8e9')
     .setFontColor('#1b5e20')
     .setFontWeight('bold')
-    .setHorizontalAlignment('left')
+    .setHorizontalAlignment('center')
     .setVerticalAlignment('middle')
     .setBorder(true, true, true, true, true, true, '#dcedc8', SpreadsheetApp.BorderStyle.SOLID);
 
-  sh.getRange(
-    SEARCH_RECORD_CONFIG.historyHeaderRow,
-    SEARCH_RECORD_CONFIG.helperStartCol,
-    1,
-    9
-  )
+  sh.getRange('B11:K11')
     .setBackground('#e8f5e9')
     .setFontColor('#1b5e20')
     .setFontWeight('bold')
@@ -148,7 +219,7 @@ function styleSearchRecordSheet_(sh) {
     .setVerticalAlignment('middle')
     .setBorder(true, true, true, true, true, true, '#c8e6c9', SpreadsheetApp.BorderStyle.SOLID);
 
-  sh.getRange('B1:J250').setFontFamily('Arial');
+  sh.getRange('B1:K250').setFontFamily('Arial');
   sh.setRowHeight(1, 32);
   sh.setRowHeight(2, 22);
 
@@ -158,6 +229,230 @@ function styleSearchRecordSheet_(sh) {
 
   sh.setRowHeight(10, 24);
   sh.setRowHeight(11, 24);
+  styleSearchRecordActionArea_(sh);
+}
+
+
+
+function styleSearchRecordActionArea_(sh) {
+  sh.getRange('F4:H6')
+    .breakApart()
+    .clearContent()
+    .clearDataValidations()
+    .clearFormat()
+    .setBackground('#ffffff')
+    .setBorder(false, false, false, false, false, false);
+
+  sh.getRange('F7')
+    .setBackground('#ffffff')
+    .setFontColor('#9AA0A6')
+    .setHorizontalAlignment('right')
+    .setVerticalAlignment('middle')
+    .setBorder(false, false, false, false, false, false);
+
+  sh.getRange('G7:H7')
+    .setBackground('#ffffff')
+    .setFontColor('#1b5e20')
+    .setFontWeight('bold')
+    .setHorizontalAlignment('left')
+    .setVerticalAlignment('middle')
+    .setBorder(false, false, false, false, false, false);
+}
+
+function setupSearchRecordActionCheckboxes_(sheet) {
+  // SEARCH RECORD checkbox has been removed.
+  // Search runs when the user edits C4 and presses Enter.
+  // Only CLEAR SEARCH remains as a dashboard-style checkbox at F7.
+  const actionArea = sheet.getRange('F4:H7');
+  actionArea
+    .breakApart()
+    .clearContent()
+    .clearDataValidations()
+    .clearFormat()
+    .setBackground('#ffffff')
+    .setBorder(false, false, false, false, false, false);
+
+  setupSearchRecordClearCheckboxCell_(sheet);
+
+  sheet.getRange(SEARCH_RECORD_CONFIG.actionClearLabelRange)
+    .breakApart()
+    .merge()
+    .setValue('CLEAR SEARCH')
+    .setBackground('#ffffff')
+    .setFontColor('#1b5e20')
+    .setFontWeight('bold')
+    .setHorizontalAlignment('left')
+    .setVerticalAlignment('middle')
+    .setBorder(false, false, false, false, false, false);
+}
+
+function setupSearchRecordClearCheckboxCell_(sheet) {
+  const range = sheet.getRange(SEARCH_RECORD_CONFIG.actionClearCell);
+
+  // Static checkbox: create it only during setup, then later only setValue(false) to untick.
+  range
+    .breakApart()
+    .clearContent()
+    .clearDataValidations()
+    .clearFormat()
+    .insertCheckboxes()
+    .setValue(false)
+    .setBackground('#ffffff')
+    .setFontColor('#9AA0A6')
+    .setHorizontalAlignment('right')
+    .setVerticalAlignment('middle')
+    .setBorder(false, false, false, false, false, false);
+}
+
+function isSearchRecordClearCheckboxHealthy_(range) {
+  const rule = range.getDataValidation();
+  const hasCheckboxRule = !!rule &&
+    rule.getCriteriaType() === SpreadsheetApp.DataValidationCriteria.CHECKBOX;
+
+  return hasCheckboxRule && typeof range.getValue() === 'boolean';
+}
+
+function setSearchRecordActiveCell_(sheet) {
+  clearSearchRecordHeaderValidation_(sheet);
+  const target = sheet.getRange(SEARCH_RECORD_CONFIG.activeAfterActionCell);
+
+  try {
+    SpreadsheetApp.getActiveSpreadsheet().setActiveSheet(sheet);
+  } catch (err) {}
+
+  try {
+    sheet.setActiveSelection(SEARCH_RECORD_CONFIG.activeAfterActionCell);
+  } catch (err) {}
+
+  try {
+    target.activate();
+  } catch (err) {}
+
+  SpreadsheetApp.flush();
+}
+
+
+function resetSearchRecordActionCheckboxes_(sheet) {
+  const checkbox = sheet.getRange(SEARCH_RECORD_CONFIG.actionClearCell);
+
+  // Keep the checkbox static. Do not rebuild/remove validation here.
+  // Just untick it after clear action is completed.
+  checkbox
+    .setValue(false)
+    .setBackground('#ffffff')
+    .setFontColor('#9AA0A6')
+    .setHorizontalAlignment('right')
+    .setVerticalAlignment('middle')
+    .setBorder(false, false, false, false, false, false);
+
+  sheet.getRange(SEARCH_RECORD_CONFIG.actionClearLabelRange)
+    .setValue('CLEAR SEARCH')
+    .setBackground('#ffffff')
+    .setFontColor('#1b5e20')
+    .setFontWeight('bold')
+    .setHorizontalAlignment('left')
+    .setVerticalAlignment('middle')
+    .setBorder(false, false, false, false, false, false);
+
+  sheet.getRange('F4:H7')
+    .setBackground('#ffffff')
+    .setBorder(false, false, false, false, false, false);
+
+  SpreadsheetApp.flush();
+}
+
+function handleSearchRecordSheetEdit_(e) {
+  try {
+    if (!e || !e.range) return false;
+
+    const range = e.range;
+    const sheet = range.getSheet();
+    if (!sheet || sheet.getName() !== SEARCH_RECORD_CONFIG.sheetName) return false;
+
+    const editedCell = range.getA1Notation();
+    const isInputEdit = editedCell === SEARCH_RECORD_CONFIG.inputCell;
+    const isClearAction = editedCell === SEARCH_RECORD_CONFIG.actionClearCell;
+
+    if (!isInputEdit && !isClearAction) return false;
+
+    const lock = LockService.getDocumentLock();
+    let lockAcquired = false;
+
+    try {
+      lock.waitLock(30000);
+      lockAcquired = true;
+
+      // Move active selection away first, before search/clear starts.
+      setSearchRecordActiveCell_(sheet);
+
+      if (isInputEdit) {
+        setSearchInputActiveStyle_(sheet);
+
+        const rawInputOriginal = safeString_(sheet.getRange(SEARCH_RECORD_CONFIG.inputCell).getDisplayValue());
+        const rawInput = stripSearchPlaceholder_(rawInputOriginal).trim();
+
+        if (!rawInput) {
+          clearSearchRecordResultsOnly_(sheet);
+          applySearchInputPlaceholder_(sheet);
+        } else {
+          runSearchRecord();
+        }
+
+        SpreadsheetApp.flush();
+        setSearchRecordActiveCell_(sheet);
+        return true;
+      }
+
+      if (isClearAction) {
+        const checkboxValue = range.getValue();
+        const eventValue = String(e.value || '').toUpperCase();
+        const isChecked = checkboxValue === true || eventValue === 'TRUE';
+
+        if (!isChecked) {
+          // Ignore untick/manual false edits. The checkbox stays static.
+          setSearchRecordActiveCell_(sheet);
+          return true;
+        }
+
+        clearSearchRecord();
+        SpreadsheetApp.flush();
+
+        resetSearchRecordActionCheckboxes_(sheet);
+        setSearchRecordActiveCell_(sheet);
+        return true;
+      }
+
+    } catch (err) {
+      try {
+        sheet.getRange(SEARCH_RECORD_CONFIG.statusCell).setValue('ACTION ERROR');
+        colorSearchStatusCell_(sheet.getRange(SEARCH_RECORD_CONFIG.statusCell), 'ACTION ERROR');
+        SpreadsheetApp.getActiveSpreadsheet().toast(
+          'Search Record action failed: ' + err.message,
+          'Secure Entry Search Record',
+          8
+        );
+      } catch (noticeErr) {
+        Logger.log('Search Record edit error notice failed: ' + noticeErr);
+      }
+      throw err;
+
+    } finally {
+      if (isClearAction) {
+        resetSearchRecordActionCheckboxes_(sheet);
+      }
+      setSearchRecordActiveCell_(sheet);
+
+      if (lockAcquired) {
+        lock.releaseLock();
+      }
+    }
+
+    return true;
+
+  } catch (outerErr) {
+    Logger.log('handleSearchRecordSheetEdit_ error: ' + outerErr);
+    throw outerErr;
+  }
 }
 
 function runSearchRecord() {
@@ -209,10 +504,13 @@ function renderSearchRecord_(sheet, result) {
   colorSearchStatusCell_(sheet.getRange(SEARCH_RECORD_CONFIG.statusCell), status);
 
   const displayMatches = result.matches.slice(0, SEARCH_RECORD_CONFIG.maxDisplayRows);
+  const timestampDisplayValues = normalizeSearchTimestampsForDisplay_(
+    displayMatches.map(function (item) { return item.timestamp; })
+  );
 
-  const values = displayMatches.map(function (item) {
+  const values = displayMatches.map(function (item, index) {
     return [
-      normalizeSearchTimestamp_(item.timestamp),
+      timestampDisplayValues[index],
       toUpperSearch_(item.namePassport),
       toUpperSearch_(item.mykadPassport),
       toUpperSearch_(item.regnum),
@@ -221,64 +519,84 @@ function renderSearchRecord_(sheet, result) {
       toUpperSearch_(item.tower),
       toUpperSearch_(item.reason),
       item.effectivePhotoLink
-        ? '=HYPERLINK("' + escapeFormulaTextSearch_(item.effectivePhotoLink) + '","OPEN PHOTO")'
+        ? '=HYPERLINK("' + escapeFormulaTextSearch_(item.effectivePhotoLink) + '","OPEN ID PHOTO")'
         : ''
     ];
   });
 
   if (values.length) {
     const startRow = SEARCH_RECORD_CONFIG.historyStartRow;
-    const startCol = SEARCH_RECORD_CONFIG.helperStartCol;
+    const leftValues = values.map(function (row) { return row.slice(0, 4); });
+    const rightValues = values.map(function (row) { return row.slice(4); });
 
-    sheet.getRange(startRow, startCol, values.length, 9).setValues(values);
+    sheet.getRange(startRow, SEARCH_RECORD_CONFIG.historyLeftStartCol, values.length, 1)
+      .setNumberFormat('@');
 
-    sheet.getRange(startRow, startCol, values.length, 1)
-      .setNumberFormat('dd/MM/yyyy HH:mm:ss')
+    sheet.getRange(startRow, SEARCH_RECORD_CONFIG.historyLeftStartCol, values.length, SEARCH_RECORD_CONFIG.historyLeftColumnCount)
+      .setValues(leftValues);
+
+    sheet.getRange(startRow, SEARCH_RECORD_CONFIG.historyRightStartCol, values.length, SEARCH_RECORD_CONFIG.historyRightColumnCount)
+      .setValues(rightValues);
+
+    // Result alignment:
+    // All result columns = left, except MYKAD / PASSPORT = center.
+    sheet.getRange(startRow, SEARCH_RECORD_CONFIG.historyLeftStartCol, values.length, SEARCH_RECORD_CONFIG.historyLeftColumnCount)
       .setHorizontalAlignment('left');
 
-    sheet.getRange(startRow, startCol + 2, values.length, 1)
+    sheet.getRange(startRow, SEARCH_RECORD_CONFIG.historyRightStartCol, values.length, SEARCH_RECORD_CONFIG.historyRightColumnCount)
+      .setHorizontalAlignment('left');
+
+    sheet.getRange(startRow, SEARCH_RECORD_CONFIG.historyLeftStartCol, values.length, 1)
+      .setNumberFormat('@');
+
+    sheet.getRange(startRow, SEARCH_RECORD_CONFIG.historyLeftStartCol + 2, values.length, 1)
       .setNumberFormat('@')
-      .setHorizontalAlignment('left');
+      .setHorizontalAlignment('center');
 
-    sheet.getRange(startRow, startCol + 4, values.length, 1)
-      .setNumberFormat('@')
-      .setHorizontalAlignment('left');
+    sheet.getRange(startRow, SEARCH_RECORD_CONFIG.historyLeftStartCol + 3, values.length, 1)
+      .setNumberFormat('@');
+
+    sheet.getRange(startRow, SEARCH_RECORD_CONFIG.historyRightStartCol, values.length, 1)
+      .setNumberFormat('@');
 
     applyHistoryRowColors_(sheet, displayMatches);
-
-    try {
-      const filter = sheet.getFilter();
-      if (filter) filter.remove();
-    } catch (err) {}
-
-    sheet.getRange(
-      SEARCH_RECORD_CONFIG.historyHeaderRow,
-      SEARCH_RECORD_CONFIG.helperStartCol,
-      values.length + 1,
-      9
-    ).createFilter();
   }
 }
 
 function applyHistoryRowColors_(sheet, matches) {
   if (!matches.length) return;
 
-  const colors = matches.map(function (item) {
-    const bg = item.hasDirectPhotoLink
-      ? '#E8F5E9'
-      : item.hasPhotoEvidence
-      ? '#F1F8E9'
-      : '#FFF8E1';
+  const leftColors = [];
+  const spacerColors = [];
+  const rightColors = [];
 
-    return [bg, bg, bg, bg, bg, bg, bg, bg, bg];
+  matches.forEach(function (item, index) {
+    const bg = index % 2 === 0 ? '#FFFFFF' : '#F3F7F3';
+    leftColors.push([bg, bg, bg, bg]);
+    spacerColors.push([bg]);
+    rightColors.push([bg, bg, bg, bg, bg]);
   });
 
   sheet.getRange(
     SEARCH_RECORD_CONFIG.historyStartRow,
-    SEARCH_RECORD_CONFIG.helperStartCol,
-    colors.length,
-    9
-  ).setBackgrounds(colors);
+    SEARCH_RECORD_CONFIG.historyLeftStartCol,
+    leftColors.length,
+    SEARCH_RECORD_CONFIG.historyLeftColumnCount
+  ).setBackgrounds(leftColors);
+
+  sheet.getRange(
+    SEARCH_RECORD_CONFIG.historyStartRow,
+    6,
+    spacerColors.length,
+    1
+  ).setBackgrounds(spacerColors);
+
+  sheet.getRange(
+    SEARCH_RECORD_CONFIG.historyStartRow,
+    SEARCH_RECORD_CONFIG.historyRightStartCol,
+    rightColors.length,
+    SEARCH_RECORD_CONFIG.historyRightColumnCount
+  ).setBackgrounds(rightColors);
 }
 
 function searchRecordsFromRawSheet_(rawSheet, detectedField, normalizedInput) {
@@ -287,14 +605,17 @@ function searchRecordsFromRawSheet_(rawSheet, detectedField, normalizedInput) {
     return { matches: [], primary: null, isMatch: false };
   }
 
-  const values = rawSheet.getRange(2, 1, lastRow - 1, 9).getValues();
-  const formulas = rawSheet.getRange(2, 1, lastRow - 1, 9).getFormulas();
+  const dataRange = rawSheet.getRange(2, 1, lastRow - 1, 9);
+  const values = dataRange.getValues();
+  const displayValues = dataRange.getDisplayValues();
+  const formulas = dataRange.getFormulas();
 
   const targetIndex = detectedField === 'REGNUM' ? 3 : 2;
   const matches = [];
 
   for (let i = values.length - 1; i >= 0; i--) {
     const row = values[i];
+    const displayRow = displayValues[i];
     const formulaRow = formulas[i];
     const rawValue = row[targetIndex];
     const candidate = normalizeSearchKey_(rawValue);
@@ -307,7 +628,7 @@ function searchRecordsFromRawSheet_(rawSheet, detectedField, normalizedInput) {
 
     matches.push({
       rowNumber: i + 2,
-      timestamp: row[0],
+      timestamp: displayRow[0] || row[0],
       namePassport: row[1],
       mykadPassport: row[2],
       regnum: row[3],
@@ -372,15 +693,28 @@ function clearSearchRecordResultsOnly_(sheet) {
     SEARCH_RECORD_CONFIG.totalMatchCell
   ]).clearContent();
 
-  sheet.getRange('C5:F5').setBackground('#F7FFF9');
+  sheet.getRange('C5:E5').setBackground('#F7FFF9');
 
   const maxRowsToClear = Math.max(sheet.getMaxRows() - SEARCH_RECORD_CONFIG.historyStartRow + 1, 1);
   sheet.getRange(
     SEARCH_RECORD_CONFIG.historyStartRow,
-    SEARCH_RECORD_CONFIG.helperStartCol,
+    SEARCH_RECORD_CONFIG.historyLeftStartCol,
     maxRowsToClear,
-    9
+    SEARCH_RECORD_CONFIG.historyLeftColumnCount
   ).clearContent().setBackground(null).setBorder(false, false, false, false, false, false);
+
+  sheet.getRange(
+    SEARCH_RECORD_CONFIG.historyStartRow,
+    SEARCH_RECORD_CONFIG.historyRightStartCol,
+    maxRowsToClear,
+    SEARCH_RECORD_CONFIG.historyRightColumnCount
+  ).clearContent().setBackground(null).setBorder(false, false, false, false, false, false);
+
+  sheet.getRange(SEARCH_RECORD_CONFIG.historyStartRow, 6, maxRowsToClear, 1)
+    .clearContent()
+    .clearDataValidations()
+    .setBackground(null)
+    .setBorder(false, false, false, false, false, false);
 }
 
 function normalizeSearchKey_(value) {
@@ -488,11 +822,114 @@ function setSearchInputActiveStyle_(sheet) {
 }
 
 function normalizeSearchTimestamp_(value) {
-  if (typeof normalizeDateValue_ === 'function') {
-    const parsed = normalizeDateValue_(value);
-    if (parsed) return parsed;
+  // Keep Secure Entry timestamps in Malaysia display format (DD/MM/YYYY HH:mm:ss).
+  // Do not pass text dates into generic parsers because ambiguous dates like 12/05/2026
+  // may be interpreted as MM/DD/YYYY and displayed wrongly as 05/12/2026.
+  const tz = Session.getScriptTimeZone() || 'Asia/Kuala_Lumpur';
+
+  if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
+    return Utilities.formatDate(value, tz, 'dd/MM/yyyy HH:mm:ss');
   }
-  return value;
+
+  const text = safeString_(value).trim();
+  if (!text) return '';
+
+  const match = text.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (match) {
+    const day = String(match[1]).padStart(2, '0');
+    const month = String(match[2]).padStart(2, '0');
+    const year = match[3];
+    const hour = String(match[4] || '00').padStart(2, '0');
+    const minute = String(match[5] || '00').padStart(2, '0');
+    const second = String(match[6] || '00').padStart(2, '0');
+    return day + '/' + month + '/' + year + ' ' + hour + ':' + minute + ':' + second;
+  }
+
+  return text;
+}
+
+function normalizeSearchTimestampsForDisplay_(timestamps) {
+  const now = new Date();
+  const maxAllowedDate = new Date(now.getTime() + (24 * 60 * 60 * 1000));
+  let previousDate = maxAllowedDate;
+
+  return timestamps.map(function (value) {
+    const normalizedText = normalizeSearchTimestamp_(value);
+    const options = getSearchTimestampOptions_(normalizedText);
+
+    if (!options.length) {
+      return normalizedText;
+    }
+
+    const validInOrder = options
+      .filter(function (item) {
+        return item.date.getTime() <= previousDate.getTime() &&
+          item.date.getTime() <= maxAllowedDate.getTime();
+      })
+      .sort(function (a, b) { return b.date.getTime() - a.date.getTime(); });
+
+    const validNotFuture = options
+      .filter(function (item) {
+        return item.date.getTime() <= maxAllowedDate.getTime();
+      })
+      .sort(function (a, b) { return b.date.getTime() - a.date.getTime(); });
+
+    const chosen = validInOrder[0] || validNotFuture[0] || options[0];
+    previousDate = chosen.date;
+
+    return chosen.text;
+  });
+}
+
+function getSearchTimestampOptions_(text) {
+  const match = safeString_(text).trim().match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (!match) return [];
+
+  const first = parseInt(match[1], 10);
+  const second = parseInt(match[2], 10);
+  const year = parseInt(match[3], 10);
+  const hour = parseInt(match[4] || '0', 10);
+  const minute = parseInt(match[5] || '0', 10);
+  const sec = parseInt(match[6] || '0', 10);
+
+  const options = [];
+  const ddmm = makeSearchTimestampOption_(first, second, year, hour, minute, sec);
+  if (ddmm) options.push(ddmm);
+
+  if (first <= 12 && second <= 12 && first !== second) {
+    const mmddCorrected = makeSearchTimestampOption_(second, first, year, hour, minute, sec);
+    if (mmddCorrected) {
+      const duplicate = options.some(function (item) {
+        return item.text === mmddCorrected.text;
+      });
+      if (!duplicate) options.push(mmddCorrected);
+    }
+  }
+
+  return options;
+}
+
+function makeSearchTimestampOption_(day, month, year, hour, minute, sec) {
+  const date = new Date(year, month - 1, day, hour, minute, sec);
+
+  if (date.getFullYear() !== year ||
+      date.getMonth() !== month - 1 ||
+      date.getDate() !== day ||
+      date.getHours() !== hour ||
+      date.getMinutes() !== minute ||
+      date.getSeconds() !== sec) {
+    return null;
+  }
+
+  return {
+    date: date,
+    text: String(day).padStart(2, '0') + '/' +
+      String(month).padStart(2, '0') + '/' +
+      String(year) + ' ' +
+      String(hour).padStart(2, '0') + ':' +
+      String(minute).padStart(2, '0') + ':' +
+      String(sec).padStart(2, '0')
+  };
 }
 
 function stripSearchPlaceholder_(value) {
@@ -519,4 +956,9 @@ function getSearchSourceSheetName_() {
 
 function getSearchSiteLabel_() {
   return safeUpper_(getSearchSourceSheetName_());
+}
+
+
+function handleSearchRecordEdit(e) {
+  if (handleSearchRecordSheetEdit_(e)) return;
 }
