@@ -17,8 +17,8 @@ const SHEET_NAME = "VISITOR";
 
 // These can be overridden using Apps Script > Project Settings > Script Properties:
 // SPREADSHEET_ID, DRIVE_FOLDER_ID, SYNC_TOKEN
-const SPREADSHEET_ID_FALLBACK = "PASTE_VISITOR_SPREADSHEET_ID";
-const DRIVE_FOLDER_ID_FALLBACK = "PASTE_VISITOR_DRIVE_FOLDER_ID";
+const SPREADSHEET_ID_FALLBACK = "1qQTFba0FlZWDxG9yUt-Ofzs16AwjXInKyPFee_BZJHs";
+const DRIVE_FOLDER_ID_FALLBACK = "1HLaxdhQ2E4UM4PZaeJHAx9DIU0gFD3Gu";
 const SYNC_TOKEN_FALLBACK = "se_sync_4YUsinaKn9no5wgRt9lcFfVoek6jlG4SkrRHLw84X2o";
 
 const TIME_ZONE = "Asia/Kuala_Lumpur";
