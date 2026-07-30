@@ -687,8 +687,8 @@ function appendChargeSummary_(body, data) {
 
   const detailsTable = detailsCell.appendTable([
     ['FIRST 24 HOURS', 'FREE'],
-    ['ADDITIONAL 24-HOUR PERIOD(S)', String(Math.max(0, Number(data.chargeBlocks) || 0))],
-    ['RATE', moneyFromCents_(data.rateCents) + ' PER ADDITIONAL STARTED 24-HOUR PERIOD']
+    ['ADDITIONAL 24 HOURS PERIOD', String(Math.max(0, Number(data.chargeBlocks) || 0))],
+    ['RATE', moneyFromCents_(data.rateCents) + ' PER ADDITIONAL STARTED 24 HOURS PERIOD']
   ]);
 
   detailsTable.setBorderColor('#DCE9DF');
