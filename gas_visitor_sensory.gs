@@ -732,7 +732,7 @@ function appendChargeSummary_(body, data) {
 
   const detailsTable = detailsCell.appendTable([
     ['FIRST 24 HOURS', 'FREE'],
-    ['ADDITIONAL 24-HOUR PERIOD(S)', String(Math.max(0, Number(data.chargeBlocks) || 0))],
+    ['ADDITIONAL 24-HOUR PERIOD', String(Math.max(0, Number(data.chargeBlocks) || 0))],
     ['RATE', moneyFromCents_(data.rateCents) + ' PER ADDITIONAL STARTED 24-HOUR PERIOD']
   ]);
 
@@ -1037,7 +1037,7 @@ function createParkingNoticePdf_(data) {
     }
   );
 
-  styleParagraph_(body.appendParagraph('NOTICE NO.: ' + noticeNumber), {
+  styleParagraph_(body.appendParagraph('NOTICE NO: ' + noticeNumber), {
     align: DocumentApp.HorizontalAlignment.CENTER,
     bold: true,
     size: 8,
@@ -1098,11 +1098,10 @@ function parkingNoticeEmailBody_(data) {
   const lines = [
     "OVERNIGHT PARKING CHARGE NOTICE",
     "",
-    "NOTICE NO.: " + toUpper_(data.noticeNumber),
-    "VEHICLE REG. NO.: " + toUpper_(data.vehicleRegNumber),
+    "NOTICE NO: " + toUpper_(data.noticeNumber),
+    "VEHICLE REG. NO: " + toUpper_(data.vehicleRegNumber),
     (multiUnit ? "UNITS VISITED: " : "UNIT NUMBER: ") +
       (unitsVisited.join(", ") || toUpper_(data.unitNumber) || "-"),
-    "VISITOR PASS NO.: " + toUpper_(data.visitorPassNumber),
     "FINAL CHECK OUT: " + (formatIsoDateTime_(data.finalCheckOutAt) || "-"),
     "TOTAL PARKING DURATION: " + durationFromSeconds_(data.totalDurationSeconds),
     "TOTAL AMOUNT DUE: " + moneyFromCents_(data.totalChargeCents)
