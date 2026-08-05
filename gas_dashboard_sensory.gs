@@ -881,10 +881,10 @@ function buildCharts_(sheet, stats) {
   const categoryStep = getAutoStep_(maxCategory);
   const towerStep = getAutoStep_(maxTower);
 
-  const hourlyMax = roundUpToStep_(addChartHeadroom_(maxHourly, 0.3), hourlyStep);
-  const monthlyMax = roundUpToStep_(addChartHeadroom_(maxMonthly, 0.3), monthlyStep);
-  const categoryMax = roundUpToStep_(addChartHeadroom_(maxCategory, 0.3), categoryStep);
-  const towerMax = roundUpToStep_(addChartHeadroom_(maxTower, 0.3), towerStep);
+  const hourlyMax = roundUpToStep_(addChartHeadroom_(maxHourly, 0.1), hourlyStep);
+  const monthlyMax = roundUpToStep_(addChartHeadroom_(maxMonthly, 0.2), monthlyStep);
+  const categoryMax = roundUpToStep_(addChartHeadroom_(maxCategory, 0.1), categoryStep);
+  const towerMax = roundUpToStep_(addChartHeadroom_(maxTower, 0.1), towerStep);
 
   // Hourly data labels are kept at the normal size for hundreds,
   // and automatically reduced when the hourly count reaches thousands.
