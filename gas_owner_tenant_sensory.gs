@@ -24,12 +24,12 @@
 const SHEET_NAME = "OWNER TENANT";
 
 // Replace these two values before deployment.
-const SPREADSHEET_ID = "PASTE_OWNER_TENANT_SPREADSHEET_ID";
-const DRIVE_FOLDER_ID = "PASTE_OWNER_TENANT_DRIVE_FOLDER_ID";
+const SPREADSHEET_ID = "1rrDeFJAT33bOEoGOBSmcdpAj6QJnIqVyNytwd0JQL7E";
+const DRIVE_FOLDER_ID = "18cm-Bzxeud0rO0mf7rvZnz1Z9tJXDsPy";
 
 // Must be EXACTLY the same SYNC_TOKEN already saved in
 // Cloudflare Worker owner-tenant-sensory.
-const SYNC_TOKEN = "PASTE_EXISTING_OWNER_TENANT_SYNC_TOKEN";
+const SYNC_TOKEN = "SE_SYNC_74220544777545bee0008961a64a63a5c223b0ca23e88751";
 
 const RETENTION_DAYS = 90;
 const TIMEZONE = "Asia/Kuala_Lumpur";
