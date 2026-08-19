@@ -1,0 +1,241 @@
+// ==================================================
+// TEMPORARY CONTROLLED TEST — SEC-02 RESIDUAL / DELETE_DRIVE
+// For GAS v7 only.
+//
+// SAFE SCOPE:
+// - Does NOT add/delete rows in SENSORY.
+// - Creates 3 temporary Drive files only.
+// - Adds 1 temporary unique SYNC META row, then removes it.
+// - Tests token isolation + folder boundary + metadata mismatch + valid deletion.
+// - Cleans all temporary artifacts in finally.
+// - Does NOT print any token values.
+//
+// After PASS, delete this entire test function block.
+// ==================================================
+
+function test_SEC02_DELETE_DRIVE_CONTROLLED() {
+  const mainSheet = getSheet_();
+  const ss = mainSheet.getParent();
+  const metaSheet = ensureSyncMetaSheet_(mainSheet);
+
+  const productionRowsBefore = mainSheet.getLastRow();
+
+  const deleteToken = getDeleteDriveToken_();
+  const syncToken = getSyncToken_();
+
+  if (!deleteToken) throw new Error("DELETE_DRIVE_TOKEN is not configured");
+  if (!syncToken) throw new Error("SYNC_TOKEN is not configured");
+
+  const testId = "__SEC02_DELETE_TEST__" + Utilities.getUuid();
+  const secureFolder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
+
+  let secureFileA = null;
+  let secureFileB = null;
+  let outsideFile = null;
+
+  function callDoPost_(payload) {
+    const res = doPost({
+      postData: {
+        contents: JSON.stringify(payload)
+      }
+    });
+    return JSON.parse(res.getContent());
+  }
+
+  function safeTrash_(file) {
+    if (!file) return;
+    try {
+      if (!file.isTrashed()) file.setTrashed(true);
+    } catch (e) {}
+  }
+
+  try {
+    // Temporary files:
+    // A = authoritative file mapped in SYNC META.
+    // B = different secure-folder file used to test mismatch.
+    // C = file outside Secure Entry folder used to test folder boundary.
+    secureFileA = secureFolder.createFile(
+      "SEC02_TEST_A_" + Utilities.getUuid() + ".txt",
+      "TEMP SEC-02 TEST A"
+    );
+
+    secureFileB = secureFolder.createFile(
+      "SEC02_TEST_B_" + Utilities.getUuid() + ".txt",
+      "TEMP SEC-02 TEST B"
+    );
+
+    outsideFile = DriveApp.createFile(
+      "SEC02_TEST_OUTSIDE_" + Utilities.getUuid() + ".txt",
+      "TEMP SEC-02 TEST OUTSIDE"
+    );
+
+    // 1 temporary durable metadata row.
+    appendSyncMeta_(
+      metaSheet,
+      testId,
+      secureFileA.getId(),
+      "",
+      formatDateTimeDMY(new Date())
+    );
+
+    // --------------------------------------------------
+    // TEST 1: SYNC_TOKEN must NOT authorize DELETE_DRIVE.
+    // --------------------------------------------------
+    const t1 = callDoPost_({
+      token: syncToken,
+      action: "DELETE_DRIVE",
+      fileIds: [secureFileB.getId()]
+    });
+
+    const test1Pass =
+      t1 &&
+      t1.success === false &&
+      String(t1.message || "") === "Unauthorized" &&
+      secureFileB.isTrashed() === false;
+
+    // --------------------------------------------------
+    // TEST 2: Wrong DELETE_DRIVE token must be rejected.
+    // --------------------------------------------------
+    const t2 = callDoPost_({
+      token: "__WRONG_DELETE_DRIVE_TOKEN__",
+      action: "DELETE_DRIVE",
+      fileIds: [secureFileB.getId()]
+    });
+
+    const test2Pass =
+      t2 &&
+      t2.success === false &&
+      String(t2.message || "") === "Unauthorized" &&
+      secureFileB.isTrashed() === false;
+
+    // --------------------------------------------------
+    // TEST 3: Valid token must NOT delete arbitrary file
+    // outside DRIVE_FOLDER_ID.
+    // --------------------------------------------------
+    const t3 = callDoPost_({
+      token: deleteToken,
+      action: "DELETE_DRIVE",
+      fileIds: [outsideFile.getId()]
+    });
+
+    const t3Reason =
+      t3 &&
+      Array.isArray(t3.failedDetails) &&
+      t3.failedDetails.length
+        ? String(t3.failedDetails[0].reason || "")
+        : "";
+
+    const test3Pass =
+      t3 &&
+      t3.success === true &&
+      Number(t3.deletedCount || 0) === 0 &&
+      t3Reason === "DRIVE_FILE_OUTSIDE_SECURE_ENTRY_FOLDER" &&
+      outsideFile.isTrashed() === false;
+
+    // --------------------------------------------------
+    // TEST 4: syncId -> Drive ID mismatch must be rejected.
+    // SYNC META maps testId -> File A, caller supplies File B.
+    // --------------------------------------------------
+    const t4 = callDoPost_({
+      token: deleteToken,
+      action: "DELETE_DRIVE",
+      items: [{
+        syncId: testId,
+        driveFileId: secureFileB.getId(),
+        requireDrive: true
+      }]
+    });
+
+    const t4Reason =
+      t4 &&
+      Array.isArray(t4.failedDetails) &&
+      t4.failedDetails.length
+        ? String(t4.failedDetails[0].reason || "")
+        : "";
+
+    const metaAfterMismatch = findSyncRecordById_(metaSheet, testId);
+
+    const test4Pass =
+      t4 &&
+      t4.success === true &&
+      Number(t4.deletedCount || 0) === 0 &&
+      t4Reason === "DRIVE_FILE_ID_MISMATCH" &&
+      secureFileA.isTrashed() === false &&
+      secureFileB.isTrashed() === false &&
+      metaAfterMismatch &&
+      String(metaAfterMismatch.driveFileId || "") === secureFileA.getId();
+
+    // --------------------------------------------------
+    // TEST 5: Correct DELETE_DRIVE_TOKEN + correct metadata
+    // must trash the valid Secure Entry file and remove its
+    // temporary SYNC META recovery row.
+    // --------------------------------------------------
+    const t5 = callDoPost_({
+      token: deleteToken,
+      action: "DELETE_DRIVE",
+      items: [{
+        syncId: testId,
+        driveFileId: secureFileA.getId(),
+        requireDrive: true
+      }]
+    });
+
+    const metaAfterValidDelete = findSyncRecordById_(metaSheet, testId);
+
+    const test5Pass =
+      t5 &&
+      t5.success === true &&
+      Number(t5.deletedCount || 0) === 1 &&
+      Array.isArray(t5.confirmedIds) &&
+      t5.confirmedIds.indexOf(testId) !== -1 &&
+      secureFileA.isTrashed() === true &&
+      metaAfterValidDelete === null;
+
+    const productionRowsAfter = mainSheet.getLastRow();
+    const productionUntouched = productionRowsBefore === productionRowsAfter;
+
+    const passed =
+      test1Pass &&
+      test2Pass &&
+      test3Pass &&
+      test4Pass &&
+      test5Pass &&
+      productionUntouched;
+
+    const result = {
+      PASSED: passed,
+      syncTokenCannotDeleteDrive: test1Pass,
+      wrongDeleteTokenRejected: test2Pass,
+      outsideFolderRejected: test3Pass,
+      syncIdDriveIdMismatchRejected: test4Pass,
+      validSecureEntryDeleteConfirmed: test5Pass,
+      productionRowsBefore: productionRowsBefore,
+      productionRowsAfter: productionRowsAfter,
+      productionSheetTouched: !productionUntouched,
+      testTokensPrinted: false
+    };
+
+    console.log("SEC-02 DELETE_DRIVE CONTROLLED TEST RESULT:");
+    console.log(JSON.stringify(result, null, 2));
+
+    if (!passed) {
+      throw new Error(
+        "SEC-02 DELETE_DRIVE controlled test FAILED: " +
+        JSON.stringify(result)
+      );
+    }
+
+    return result;
+
+  } finally {
+    // Remove temporary metadata if a failed test left it behind.
+    try {
+      deleteSyncMetaById_(metaSheet, testId);
+    } catch (e) {}
+
+    // Remove all temporary Drive artifacts.
+    safeTrash_(secureFileA);
+    safeTrash_(secureFileB);
+    safeTrash_(outsideFile);
+  }
+}
