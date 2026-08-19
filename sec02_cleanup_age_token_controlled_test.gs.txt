@@ -1,0 +1,114 @@
+// ==================================================
+// TEMPORARY CONTROLLED TEST — SEC-02 / CLEANUP_AGE TOKEN
+// GAS v7 only.
+//
+// ZERO-RISK SCOPE:
+// - Does NOT call CLEANUP_AGE action.
+// - Does NOT touch SENSORY, SYNC META, Drive, or cache.
+// - Tests only the token authorization matrix.
+// - Does NOT print any token values.
+//
+// Delete this function after PASS.
+// ==================================================
+
+function test_SEC02_CLEANUP_AGE_TOKEN_CONTROLLED() {
+  const syncToken = getSyncToken_();
+  const deleteDriveToken = getDeleteDriveToken_();
+  const cleanupAgeToken = getCleanupAgeToken_();
+
+  if (!syncToken) throw new Error("SYNC_TOKEN is not configured");
+  if (!deleteDriveToken) throw new Error("DELETE_DRIVE_TOKEN is not configured");
+  if (!cleanupAgeToken) throw new Error("CLEANUP_AGE_TOKEN is not configured");
+
+  // 1) SYNC_TOKEN must NOT authorize CLEANUP_AGE.
+  const t1 = authorizeActionToken_(
+    { token: syncToken },
+    "CLEANUP_AGE"
+  );
+
+  const test1Pass =
+    t1 &&
+    t1.ok === false &&
+    String(t1.message || "") === "Unauthorized";
+
+  // 2) DELETE_DRIVE_TOKEN must NOT authorize CLEANUP_AGE.
+  const t2 = authorizeActionToken_(
+    { token: deleteDriveToken },
+    "CLEANUP_AGE"
+  );
+
+  const test2Pass =
+    t2 &&
+    t2.ok === false &&
+    String(t2.message || "") === "Unauthorized";
+
+  // 3) Wrong token must be rejected.
+  const t3 = authorizeActionToken_(
+    { token: "__WRONG_CLEANUP_AGE_TOKEN__" },
+    "CLEANUP_AGE"
+  );
+
+  const test3Pass =
+    t3 &&
+    t3.ok === false &&
+    String(t3.message || "") === "Unauthorized";
+
+  // 4) CLEANUP_AGE_TOKEN must authorize CLEANUP_AGE.
+  const t4 = authorizeActionToken_(
+    { token: cleanupAgeToken },
+    "CLEANUP_AGE"
+  );
+
+  const test4Pass =
+    t4 &&
+    t4.ok === true;
+
+  // 5) CLEANUP_AGE_TOKEN must NOT authorize normal SYNC.
+  const t5 = authorizeActionToken_(
+    { token: cleanupAgeToken },
+    ""
+  );
+
+  const test5Pass =
+    t5 &&
+    t5.ok === false &&
+    String(t5.message || "") === "Unauthorized";
+
+  // 6) All three privileged tokens must be distinct.
+  const test6Pass =
+    syncToken !== deleteDriveToken &&
+    syncToken !== cleanupAgeToken &&
+    deleteDriveToken !== cleanupAgeToken;
+
+  const passed =
+    test1Pass &&
+    test2Pass &&
+    test3Pass &&
+    test4Pass &&
+    test5Pass &&
+    test6Pass;
+
+  const result = {
+    PASSED: passed,
+    syncTokenCannotCleanupAge: test1Pass,
+    deleteDriveTokenCannotCleanupAge: test2Pass,
+    wrongCleanupTokenRejected: test3Pass,
+    cleanupAgeTokenAuthorizesCleanupAge: test4Pass,
+    cleanupAgeTokenCannotNormalSync: test5Pass,
+    allPrivilegedTokensDistinct: test6Pass,
+    productionDataTouched: false,
+    tokenValuesPrinted: false
+  };
+
+  console.log("SEC-02 CLEANUP_AGE TOKEN CONTROLLED TEST RESULT:");
+  console.log(JSON.stringify(result, null, 2));
+
+  if (!passed) {
+    throw new Error(
+      "SEC-02 CLEANUP_AGE token controlled test FAILED: " +
+      JSON.stringify(result)
+    );
+  }
+
+  return result;
+}
