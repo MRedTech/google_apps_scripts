@@ -1,0 +1,184 @@
+// ==================================================
+// TEMPORARY CONTROLLED TEST — GAS v8 FOLDER PROTECTION
+// Tests cleanupByAge_() only.
+//
+// SAFE SCOPE:
+// - Does NOT add/delete rows in SENSORY.
+// - Creates temporary sheet "SEC02 RETENTION TEST".
+// - Creates 1 temp file INSIDE DRIVE_FOLDER_ID.
+// - Creates 1 temp file OUTSIDE DRIVE_FOLDER_ID.
+// - Both test rows are intentionally >90 days old.
+// - cleanupByAge_() must:
+//     * trash the inside-folder file
+//     * refuse to trash the outside-folder file
+//     * still delete both expired rows from the TEMP sheet
+// - Restores RETENTION_LAST_FULL_SCAN_MS exactly.
+// - Deletes all temp artifacts in finally.
+//
+// Delete this test function after PASS.
+// ==================================================
+
+function test_GAS_V8_FOLDER_PROTECTION_CONTROLLED() {
+  const TEST_SHEET_NAME = "SEC02 RETENTION TEST";
+  const mainSheet = getSheet_();
+  const ss = mainSheet.getParent();
+  const props = PropertiesService.getScriptProperties();
+
+  const productionRowsBefore = mainSheet.getLastRow();
+  const oldFullScanProp = props.getProperty(RETENTION_LAST_FULL_SCAN_PROP);
+
+  let testSheet = ss.getSheetByName(TEST_SHEET_NAME);
+  if (testSheet) ss.deleteSheet(testSheet);
+
+  const secureFolder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
+
+  let insideFile = null;
+  let outsideFile = null;
+
+  function safeTrashById_(fileId) {
+    if (!fileId) return;
+    try {
+      const f = DriveApp.getFileById(fileId);
+      if (!f.isTrashed()) f.setTrashed(true);
+    } catch (e) {}
+  }
+
+  try {
+    testSheet = ss.insertSheet(TEST_SHEET_NAME);
+
+    testSheet.getRange(1, 1, 1, 9).setValues([[
+      "TIMESTAMP",
+      "NAME",
+      "MYKAD/PASSPORT",
+      "REG.NUM",
+      "CONTACT",
+      "CATEGORY",
+      "TOWER",
+      "REMARK",
+      "PHOTO LINK"
+    ]]);
+
+    insideFile = secureFolder.createFile(
+      "SEC02_RETENTION_INSIDE_" + Utilities.getUuid() + ".txt",
+      "TEMP GAS v8 folder protection test"
+    );
+
+    outsideFile = DriveApp.createFile(
+      "SEC02_RETENTION_OUTSIDE_" + Utilities.getUuid() + ".txt",
+      "TEMP GAS v8 folder protection test"
+    );
+
+    const insideId = insideFile.getId();
+    const outsideId = outsideFile.getId();
+
+    const expiredTs = formatDateTimeDMY(
+      new Date(Date.now() - (120 * 86400000))
+    );
+
+    testSheet.getRange(2, 1, 2, 9).setValues([
+      [
+        expiredTs,
+        "SEC02 INSIDE",
+        "",
+        "TEST-IN",
+        "",
+        "OTHER",
+        "TOWER A",
+        "",
+        "https://drive.google.com/uc?export=view&id=" + insideId
+      ],
+      [
+        expiredTs,
+        "SEC02 OUTSIDE",
+        "",
+        "TEST-OUT",
+        "",
+        "OTHER",
+        "TOWER A",
+        "",
+        "https://drive.google.com/uc?export=view&id=" + outsideId
+      ]
+    ]);
+
+    const cleanup = cleanupByAge_(testSheet, 90, true);
+
+    // Re-fetch after cleanup so we don't rely on stale Drive File objects.
+    let insideTrashed = false;
+    let outsideTrashed = false;
+
+    try {
+      insideTrashed = DriveApp.getFileById(insideId).isTrashed() === true;
+    } catch (e) {
+      insideTrashed = true;
+    }
+
+    try {
+      outsideTrashed = DriveApp.getFileById(outsideId).isTrashed() === true;
+    } catch (e) {
+      outsideTrashed = true;
+    }
+
+    const tempRowsRemaining = Math.max(0, testSheet.getLastRow() - 1);
+    const productionRowsAfter = mainSheet.getLastRow();
+
+    const pass =
+      cleanup &&
+      cleanup.rowsDeleted === 2 &&
+      cleanup.driveDeleteAttempted === 2 &&
+      cleanup.driveDeleteConfirmed === 1 &&
+      cleanup.driveDeleteFailed === 1 &&
+      insideTrashed === true &&
+      outsideTrashed === false &&
+      tempRowsRemaining === 0 &&
+      productionRowsBefore === productionRowsAfter;
+
+    const result = {
+      PASSED: pass,
+      rowsDeletedFromTempSheet: cleanup ? cleanup.rowsDeleted : null,
+      driveDeleteAttempted: cleanup ? cleanup.driveDeleteAttempted : null,
+      driveDeleteConfirmed: cleanup ? cleanup.driveDeleteConfirmed : null,
+      driveDeleteFailed: cleanup ? cleanup.driveDeleteFailed : null,
+      insideSecureFolderFileTrashed: insideTrashed,
+      outsideFolderFileProtected: outsideTrashed === false,
+      tempRowsRemaining: tempRowsRemaining,
+      productionRowsBefore: productionRowsBefore,
+      productionRowsAfter: productionRowsAfter,
+      productionSheetTouched: productionRowsBefore !== productionRowsAfter
+    };
+
+    console.log("GAS v8 FOLDER PROTECTION CONTROLLED TEST RESULT:");
+    console.log(JSON.stringify(result, null, 2));
+
+    if (!pass) {
+      throw new Error(
+        "GAS v8 folder protection controlled test FAILED: " +
+        JSON.stringify(result)
+      );
+    }
+
+    return result;
+
+  } finally {
+    // Restore production retention throttle state exactly.
+    if (oldFullScanProp === null) {
+      props.deleteProperty(RETENTION_LAST_FULL_SCAN_PROP);
+    } else {
+      props.setProperty(RETENTION_LAST_FULL_SCAN_PROP, oldFullScanProp);
+    }
+
+    // Clean up remaining test Drive files.
+    try {
+      if (insideFile) safeTrashById_(insideFile.getId());
+    } catch (e) {}
+
+    try {
+      if (outsideFile) safeTrashById_(outsideFile.getId());
+    } catch (e) {}
+
+    // Remove temporary sheet.
+    const cleanupSheet = ss.getSheetByName(TEST_SHEET_NAME);
+    if (cleanupSheet) {
+      ss.deleteSheet(cleanupSheet);
+    }
+  }
+}
