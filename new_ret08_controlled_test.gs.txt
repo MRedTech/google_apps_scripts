@@ -1,0 +1,92 @@
+// ==================================================
+// TEMPORARY CONTROLLED TEST — NEW-RET-08
+// For GAS v10 only.
+//
+// ZERO-RISK:
+// - Does NOT call doGet()
+// - Does NOT touch SENSORY, SYNC META, Drive, D1 or cache
+// - Uses synthetic timestamps only
+// - Verifies the production doGet source orders the latest-row
+//   retention check BEFORE the EXPIRED return
+//
+// Delete this function after PASS.
+// ==================================================
+
+function test_NEW_RET_08_CONTROLLED() {
+  const now = new Date();
+
+  function dmyAgo_(days) {
+    return formatDateTimeDMY(
+      new Date(now.getTime() - (days * 86400000))
+    );
+  }
+
+  // Synthetic cases reflecting the intended legacy GAS semantics.
+  const activeLatestTs = dmyAgo_(10);
+  const activeProofTs = dmyAgo_(20);
+  const expiredProofTs = dmyAgo_(100);
+  const outsideRetentionLatestTs = dmyAgo_(91);
+
+  const foundCase =
+    !isExpiredByAge_(activeLatestTs, RETENTION_DAYS) &&
+    !isExpiredByAge_(activeProofTs, RETENTION_DAYS);
+
+  const expiredCase =
+    !isExpiredByAge_(activeLatestTs, RETENTION_DAYS) &&
+    isExpiredByAge_(expiredProofTs, RETENTION_DAYS);
+
+  const noRecordCase =
+    isExpiredByAge_(outsideRetentionLatestTs, RETENTION_DAYS);
+
+  // Source-order verification: latest-row retention gate must execute
+  // before the legacy EXPIRED fast return.
+  const src = String(doGet);
+  const latestGatePos = src.indexOf(
+    "if (isExpiredByAge_(anyTimestamp, RETENTION_DAYS))"
+  );
+  const expiredReturnMarkerPos = src.indexOf(
+    'if (result.status === "EXPIRED")'
+  );
+
+  const latestGatePresent = latestGatePos !== -1;
+  const expiredReturnPresent = expiredReturnMarkerPos !== -1;
+  const latestGateBeforeExpiredReturn =
+    latestGatePresent &&
+    expiredReturnPresent &&
+    latestGatePos < expiredReturnMarkerPos;
+
+  const noRecordReturnAfterLatestGate =
+    latestGatePresent &&
+    src.slice(latestGatePos, expiredReturnMarkerPos)
+      .indexOf("return output_({ exist: false });") !== -1;
+
+  const passed =
+    foundCase &&
+    expiredCase &&
+    noRecordCase &&
+    latestGateBeforeExpiredReturn &&
+    noRecordReturnAfterLatestGate;
+
+  const result = {
+    PASSED: passed,
+    foundCaseWithinRetention: foundCase,
+    expiredCaseLatestStillWithinRetention: expiredCase,
+    over90DayLatestBecomesNoRecord: noRecordCase,
+    latestRetentionGatePresent: latestGatePresent,
+    latestGateBeforeExpiredReturn: latestGateBeforeExpiredReturn,
+    noRecordReturnAfterLatestGate: noRecordReturnAfterLatestGate,
+    productionDataTouched: false
+  };
+
+  console.log("NEW-RET-08 CONTROLLED TEST RESULT:");
+  console.log(JSON.stringify(result, null, 2));
+
+  if (!passed) {
+    throw new Error(
+      "NEW-RET-08 controlled test FAILED: " +
+      JSON.stringify(result)
+    );
+  }
+
+  return result;
+}
